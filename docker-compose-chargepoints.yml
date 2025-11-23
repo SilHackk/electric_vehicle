@@ -1,0 +1,64 @@
+services:
+  cp_engine_1:
+    build:
+      context: .
+      dockerfile: Dockerfile.cp
+    container_name: chargepoint_engine_1
+    environment:
+      KAFKA_BROKER: 172.21.42.11:9092  # <-- HOST PC IP
+    command: python charging_point/ev_cp_engine.py CP-001 40.5 -3.1 0.30 172.21.42.11 5000
+    #                                                                    ^^^^^^^^^^^^
+    #                                                                    HOST PC IP
+    ports:
+      - "6001:6001"
+    network_mode: host
+    stdin_open: true
+    tty: true
+
+  cp_monitor_1:
+    build:
+      context: .
+      dockerfile: Dockerfile.cp
+    container_name: chargepoint_monitor_1
+    depends_on:
+      - cp_engine_1
+    environment:
+      KAFKA_BROKER: 172.21.42.11:9092  # <-- HOST PC IP
+    command: python charging_point/ev_cp_monitor.py CP-001 localhost 6001 172.21.42.11 5000
+    #                                                                      ^^^^^^^^^^^^
+    #                                                                      HOST PC IP
+    network_mode: host
+    stdin_open: true
+    tty: true
+
+  cp_engine_2:
+    build:
+      context: .
+      dockerfile: Dockerfile.cp
+    container_name: chargepoint_engine_2
+    environment:
+      KAFKA_BROKER: 172.21.42.11:9092  # <-- HOST PC IP
+    command: python charging_point/ev_cp_engine.py CP-002 40.4 -3.2 0.35 172.21.42.11 5000
+    #                                                                     ^^^^^^^^^^^^
+    #                                                                     HOST PC IP
+    ports:
+      - "6002:6002"
+    network_mode: host
+    stdin_open: true
+    tty: true
+
+  cp_monitor_2:
+    build:
+      context: .
+      dockerfile: Dockerfile.cp
+    container_name: chargepoint_monitor_2
+    depends_on:
+      - cp_engine_2
+    environment:
+      KAFKA_BROKER: 172.21.42.11:9092  # <-- HOST PC IP
+    command: python charging_point/ev_cp_monitor.py CP-002 localhost 6002 172.21.42.11 5000
+    #                                                                      ^^^^^^^^^^^^
+    #                                                                      HOST PC IP
+    network_mode: host
+    stdin_open: true
+    tty: true
