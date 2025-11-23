@@ -95,7 +95,7 @@ class CentralUIClient:
     def _handle_message(self, fields):
         # fields is a list: [type, ...rest]
         typ = fields[0]
-        # print(f"[Web UI] Received: {fields}")
+        # print(f"[Web UI] Received: {typ} with {len(fields)} fields")
         try:
             if typ == "FULL_STATE":
                 # expected: FULL_STATE, cps_str, drivers_str, history_str
@@ -126,46 +126,87 @@ class CentralUIClient:
                     kwh_inc = float(fields[2])
                     amount = float(fields[3])
                     # update cp record: increment
-                    # try to preserve existing totals if present
                     snapshot = self.state.snapshot()
                     cp = snapshot["charging_points"].get(cp_id, {})
                     kwh = cp.get("kwh_delivered", 0.0) + kwh_inc
                     amt = amount
                     self.state.update_cp(cp_id, {"kwh_delivered": kwh, "amount_euro": amt})
             elif typ == MessageTypes.SUPPLY_END or typ == "DRIVER_STOP" or typ == MessageTypes.TICKET:
-                # handle end-of-charge types (fields vary)
-                # when supply ends, central normally sends SUPPLY_END with cp_id, driver_id, total_kwh, total_amount
+                # handle end-of-charge types
                 try:
                     if typ == MessageTypes.SUPPLY_END and len(fields) >= 5:
-                        cp_id = fields[1]; driver_id = fields[2]
-                        total_kwh = float(fields[3]); total_amount = float(fields[4])
+                        cp_id = fields[1]
+                        driver_id = fields[2]
+                        total_kwh = float(fields[3])
+                        total_amount = float(fields[4])
                         self.state.update_cp(cp_id, {"state": "ACTIVATED", "current_driver": None, "kwh_delivered": 0.0, "amount_euro": 0.0})
                         self.state.update_driver(driver_id, {"status": "IDLE", "current_cp": None})
                         self.state.add_history({
                             "cp_id": cp_id, "driver_id": driver_id, "kwh_delivered": total_kwh, "total_amount": total_amount, "timestamp": time.time()
                         })
-                except Exception:
-                    pass
-            elif typ == MessageTypes.REGISTER:
+                except Exception as e:
+                    print(f"[Web UI] Error handling {typ}: {e}")
+            elif typ == MessageTypes.REGISTER or typ == MessageTypes.ACKNOWLEDGE:
                 # ACK for register - ignore or log
                 pass
             else:
-                # generic: if message contains cp status updates like DRIVER_START / DRIVER_STOP / CHARGING_COMPLETE
+                # generic: handle cp status updates like DRIVER_START / DRIVER_STOP / CHARGING_COMPLETE
                 if typ == "DRIVER_START" and len(fields) >= 3:
-                    cp_id = fields[1]; driver_id = fields[2]
+                    cp_id = fields[1]
+                    driver_id = fields[2]
                     self.state.update_cp(cp_id, {"state": "SUPPLYING", "current_driver": driver_id})
                     self.state.update_driver(driver_id, {"status": "CHARGING", "current_cp": cp_id})
+                    print(f"[Web UI] DRIVER_START: {driver_id} at {cp_id}")
                 elif typ == "DRIVER_STOP" and len(fields) >= 3:
-                    cp_id = fields[1]; driver_id = fields[2]
+                    cp_id = fields[1]
+                    driver_id = fields[2]
                     self.state.update_cp(cp_id, {"state": "ACTIVATED", "current_driver": None, "kwh_delivered": 0.0, "amount_euro": 0.0})
                     self.state.update_driver(driver_id, {"status": "IDLE", "current_cp": None})
+                    print(f"[Web UI] DRIVER_STOP: {driver_id} from {cp_id}")
                 elif typ == "CHARGING_COMPLETE" and len(fields) >= 3:
-                    cp_id = fields[1]; driver_id = fields[2]
+                    cp_id = fields[1]
+                    driver_id = fields[2]
                     self.state.update_cp(cp_id, {"charging_complete": True})
-                # else ignore unknown events
+                    print(f"[Web UI] CHARGING_COMPLETE: {driver_id} at {cp_id}")
         except Exception as e:
             print(f"[Web UI] _handle_message error: {e}")
             traceback.print_exc()
+
+    def send_command(self, command_type, driver_id=None, cp_id=None, kwh_needed=10):
+        """
+        Send commands to Central system via protocol
+        command_type: REQUEST_CHARGE, FINISH_CHARGE, etc.
+        """
+        if not self.sock:
+            print("[Web UI] Cannot send command: not connected")
+            return False
+        
+        try:
+            with self.lock:
+                if command_type == "REQUEST_CHARGE":
+                    msg = Protocol.build_message(
+                        MessageTypes.REQUEST_CHARGE,
+                        driver_id,
+                        cp_id,
+                        kwh_needed
+                    )
+                elif command_type == "FINISH_CHARGE":
+                    msg = Protocol.build_message(
+                        MessageTypes.END_CHARGE,
+                        driver_id,
+                        cp_id
+                    )
+                else:
+                    print(f"[Web UI] Unknown command type: {command_type}")
+                    return False
+                
+                encoded = Protocol.encode(msg)
+                self.sock.send(encoded)
+                print(f"[Web UI] Sent {command_type} for {driver_id} at {cp_id}")
+                return True
+        except Exception as e:
+            print(f"[Web UI] Error sending command: {e}")
+            return False
 
     def _close_socket(self):
         if self.sock:
