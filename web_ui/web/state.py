@@ -6,14 +6,16 @@ from copy import deepcopy
 class UIState:
     def __init__(self):
         self.lock = threading.Lock()
-        self.charging_points = {}  # cp_id -> dict
-        self.drivers = {}          # driver_id -> dict
-        self.history = []          # list of sessions
+        self.charging_points = {}
+        self.drivers = {}
+        self.history = []
+        self.last_update = time.time()
+
+    def _touch(self):
         self.last_update = time.time()
 
     def set_full_state(self, cps, drivers, history):
         with self.lock:
-            # cps expected as: list of [cp_id, state, lat, lon, price, current_driver, kwh, amount]
             self.charging_points = {}
             for item in cps:
                 try:
@@ -22,31 +24,28 @@ class UIState:
                         "state": item[1],
                         "location": [item[2], item[3]],
                         "price_per_kwh": float(item[4]),
-                        "current_driver": item[5] if item[5] else None,
+                        "current_driver": item[5] or None,
                         "kwh_delivered": float(item[6]),
                         "amount_euro": float(item[7])
                     }
-                except Exception:
-                    # if parsing fails, skip
+                except:
                     continue
 
-            # drivers expected as list of [driver_id, status, current_cp]
             self.drivers = {}
             for d in drivers:
                 try:
                     did = d[0]
                     self.drivers[did] = {
                         "status": d[1],
-                        "current_cp": d[2] if d[2] else None
+                        "current_cp": d[2] or None
                     }
-                except Exception:
+                except:
                     continue
 
-            # history: list of session dicts (already parsed by central)
             self.history = history or []
-            self.last_update = time.time()
+            self._touch()
 
-    def update_cp(self, cp_id, fields: dict):
+    def update_cp(self, cp_id, fields):
         with self.lock:
             cp = self.charging_points.setdefault(cp_id, {
                 "state": "DISCONNECTED",
@@ -57,20 +56,19 @@ class UIState:
                 "amount_euro": 0.0
             })
             cp.update(fields)
-            self.last_update = time.time()
+            self._touch()
 
-    def update_driver(self, driver_id, fields: dict):
+    def update_driver(self, driver_id, fields):
         with self.lock:
             d = self.drivers.setdefault(driver_id, {"status": "IDLE", "current_cp": None})
             d.update(fields)
-            self.last_update = time.time()
+            self._touch()
 
     def add_history(self, session):
         with self.lock:
             self.history.insert(0, session)
-            # keep only recent 100
             self.history = self.history[:100]
-            self.last_update = time.time()
+            self._touch()
 
     def snapshot(self):
         with self.lock:
