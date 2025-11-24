@@ -1,0 +1,20 @@
+# ============================================================================
+# Dockerfile.driver - EV_Driver
+# ============================================================================
+FROM python:3.11-slim
+
+WORKDIR /app
+
+ENV PYTHONPATH=/app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY config.py .
+COPY shared/ shared/
+COPY driver/ driver/
+COPY data/ data/
+
+ENV PYTHONUNBUFFERED=1
+
+CMD ["python", "driver/ev_driver.py", "DRIVER-001", "central", "5000", "data/charging_requests.txt"]

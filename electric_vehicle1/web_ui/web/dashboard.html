@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>EVCharging System - Live Dashboard</title>
+    <style>
+        /* Keep your styles (trimmed slightly for clarity) */
+        :root { --brand:#667eea; --accent:#764ba2; }
+        *{box-sizing:border-box;margin:0;padding:0}
+        body{font-family:Segoe UI, Tahoma, Arial;background:linear-gradient(135deg,var(--brand),var(--accent));padding:20px;min-height:100vh}
+        .container{max-width:1200px;margin:0 auto}
+        header{background:#fff;border-radius:12px;padding:20px;margin-bottom:18px;box-shadow:0 8px 24px rgba(0,0,0,.12)}
+        h1{color:var(--brand);font-size:1.8rem}
+        .status-bar{display:flex;gap:12px;margin-top:10px;flex-wrap:wrap}
+        .status-item{background:#f5f5f5;padding:8px 14px;border-radius:8px;font-weight:700}
+        .status-item.online{background:#d4edda;color:#155724}
+        .dashboard{display:grid;grid-template-columns:2fr 1fr 1fr;gap:16px}
+        .card{background:#fff;border-radius:12px;padding:18px;box-shadow:0 8px 24px rgba(0,0,0,.08)}
+        .driver-terminal{background:#0f1720;color:#00ff99;padding:12px;border-radius:8px;height:260px;overflow:auto;font-family:monospace;font-size:13px}
+        .driver-log-line{margin:4px 0;line-height:1.3}
+        .driver-log-line.info{color:#00ff99}
+        .driver-log-line.success{color:#66ffff}
+        .driver-log-line.warning{color:#fff176}
+        .driver-log-line.error{color:#ff6b6b}
+        .cp-item{background:#f8f9fa;border-left:6px solid #6c757d;padding:12px;border-radius:8px;margin-bottom:12px}
+        .cp-item.activated{border-left-color:#28a745;background:#eaf8ee}
+        .cp-item.supplying{border-left-color:#007bff;background:#e8f1ff}
+        .cp-header{display:flex;justify-content:space-between;align-items:center}
+        .cp-id{font-weight:700}
+        .cp-status{padding:6px 12px;border-radius:20px;font-weight:700}
+        .status-activated{background:#28a745;color:#fff}
+        .status-supplying{background:#007bff;color:#fff}
+        .no-data{text-align:center;color:#888;padding:18px}
+        .stat-box{background:linear-gradient(135deg,var(--brand),var(--accent));color:#fff;padding:18px;border-radius:8px;text-align:center}
+        .modal{display:none;position:fixed;left:0;top:0;width:100%;height:100%;background:rgba(0,0,0,.5);z-index:1000}
+        .modal-content{background:#fff;width:360px;margin:10% auto;border-radius:12px;padding:18px}
+        .btn{padding:10px;border-radius:8px;border:0;cursor:pointer;font-weight:700}
+        .btn-request{background:#28a745;color:#fff}
+        .btn-finish{background:#ffc107}
+        .driver-status-item{display:flex;justify-content:space-between;padding:6px 0}
+        .update-time{color:#fff;text-align:center;margin-top:14px}
+    </style>
+</head>
+<body>
+<div class="container">
+    <header>
+        <h1>⚡ EVCharging System Dashboard</h1>
+        <div class="status-bar">
+            <div id="connection-status" class="status-item">🔴 Disconnected</div>
+            <div id="last-update" class="status-item">Last Update: —</div>
+        </div>
+    </header>
+
+    <div id="error-container"></div>
+
+    <div class="dashboard">
+        <div class="card driver-control">
+            <h2>🚗 Driver Control (DRIVER-001)</h2>
+            <div id="driver-terminal" class="driver-terminal"></div>
+
+            <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-top:12px">
+                <button class="btn btn-request" onclick="showRequestModal()">🔌 Request Charge</button>
+                <button class="btn" onclick="driverViewStatus()">📊 View Status</button>
+                <button class="btn" onclick="driverViewCPs()">🔍 Available CPs</button>
+                <button class="btn btn-finish" onclick="driverFinishCharging()">🔚 Finish Charging</button>
+            </div>
+
+            <div style="margin-top:12px" class="driver-status">
+                <h3 style="color:var(--brand);margin-bottom:6px">Current Status</h3>
+                <div class="driver-status-item"><span>Status:</span><span id="driver-status-text">IDLE</span></div>
+                <div class="driver-status-item"><span>Charging Point:</span><span id="driver-cp-text">None</span></div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>🔌 Charging Points</h2>
+            <div id="charging-points">
+                <div class="no-data">Loading charging points...</div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>📊 Statistics</h2>
+            <div style="display:grid;gap:10px">
+                <div class="stat-box"><div style="font-size:1.4rem" id="stat-total-cps">0</div><div>Total CPs</div></div>
+                <div class="stat-box"><div style="font-size:1.4rem" id="stat-active-charges">0</div><div>Active Charges</div></div>
+                <div class="stat-box"><div style="font-size:1.4rem" id="stat-total-energy">0.00</div><div>Total kWh</div></div>
+                <div class="stat-box"><div style="font-size:1.4rem" id="stat-total-revenue">€0.00</div><div>Total Revenue</div></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="update-time" id="update-time">System monitoring active...</div>
+</div>
+
+<!-- Request Modal -->
+<div id="requestModal" class="modal">
+    <div class="modal-content">
+        <h3>🔌 Request Charge</h3>
+        <select id="cp-select" style="width:100%;padding:8px;border-radius:8px;margin-top:8px"></select>
+        <input id="kwh-input" type="number" min="1" max="100" value="10" style="width:100%;padding:8px;border-radius:8px;margin-top:8px"/>
+        <div style="display:flex;gap:8px;margin-top:12px">
+            <button class="btn btn-request" onclick="confirmRequest()">Confirm</button>
+            <button class="btn" onclick="closeModal()">Cancel</button>
+        </div>
+    </div>
+</div>
+
+<script>
+/* Dashboard JavaScript - works with server.py SSE and REST endpoints */
+const API_URL = window.location.origin;
+const POLLING_INTERVAL = 2000; // fallback polling interval (ms)
+const DRIVER_ID = "DRIVER-001";
+
+let latestDashboardData = { charging_points: {}, drivers: {} };
+
+// Elements
+const chargingPointsContainer = document.getElementById('charging-points');
+const lastUpdateEl = document.getElementById('last-update');
+const connectionStatusEl = document.getElementById('connection-status');
+const driverTerminal = document.getElementById('driver-terminal');
+const driverStatusText = document.getElementById('driver-status-text');
+const driverCpText = document.getElementById('driver-cp-text');
+
+// Terminal logging
+function logDriver(msg, type='info') {
+    const line = document.createElement('div');
+    line.className = `driver-log-line ${type}`;
+    line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+    driverTerminal.appendChild(line);
+    driverTerminal.scrollTop = driverTerminal.scrollHeight;
+}
+
+// Init messages
+logDriver("Driver initializing...", "info");
+setTimeout(()=>logDriver("✓ Connected to CENTRAL (local UI)", "success"), 400);
+setTimeout(()=>logDriver("Ready for commands", "success"), 800);
+
+// Helper: fetch dashboard snapshot and render
+async function fetchDashboardData() {
+    try {
+        const res = await fetch(`${API_URL}/api/dashboard`, {cache: "no-store"});
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        latestDashboardData = {
+            charging_points: data.charging_points || {},
+            drivers: data.drivers || {},
+            timestamp: data.timestamp || null
+        };
+        renderDashboard();
+        // Visuals
+        connectionStatusEl.textContent = '🟢 Connected to Central';
+        connectionStatusEl.classList.add('online');
+        lastUpdateEl.textContent = `Last Update: ${latestDashboardData.timestamp ? new Date(latestDashboardData.timestamp * 1000).toLocaleTimeString() : '—'}`;
+    } catch (err) {
+        console.error('fetchDashboardData error', err);
+        connectionStatusEl.textContent = '🔴 Connection Error';
+        connectionStatusEl.classList.remove('online');
+    }
+}
+
+function renderDashboard() {
+    updateChargingPoints(latestDashboardData.charging_points);
+    updateDriverStatus(latestDashboardData.drivers[DRIVER_ID]);
+    updateStatistics();
+}
+
+function updateChargingPoints(cps) {
+    chargingPointsContainer.innerHTML = '';
+    if (!cps || Object.keys(cps).length === 0) {
+        chargingPointsContainer.innerHTML = '<div class="no-data">No charging points found.</div>';
+        return;
+    }
+
+    for (const [cpId, cp] of Object.entries(cps)) {
+        const state = (cp.state || 'DISCONNECTED').toUpperCase();
+        const stateClass = state.toLowerCase().replace(/_/g,'-');
+        const maxCapacity = 15.0;
+        const progressPercent = Math.min(((cp.kwh_delivered || 0) / maxCapacity) * 100, 100).toFixed(0);
+
+        const el = document.createElement('div');
+        el.className = `cp-item ${stateClass}`;
+        el.innerHTML = `
+            <div class="cp-header">
+                <div class="cp-id">${cpId}</div>
+                <div class="cp-status status-${stateClass}">${state}</div>
+            </div>
+            <div style="margin-top:8px">
+                <div style="display:flex;justify-content:space-between"><strong>Location:</strong><span>(${(cp.location||[])[0]||0}, ${(cp.location||[])[1]||0})</span></div>
+                <div style="display:flex;justify-content:space-between"><strong>Price:</strong><span>${(cp.price_per_kwh||0).toFixed(2)}€/kWh</span></div>
+                ${state === 'SUPPLYING' ? `
+                    <div style="display:flex;justify-content:space-between"><strong>Driver:</strong><span>${cp.current_driver || 'Unknown'}</span></div>
+                    <div style="display:flex;justify-content:space-between"><strong>Energy:</strong><span>${(cp.kwh_delivered||0).toFixed(2)} kWh</span></div>
+                    <div style="display:flex;justify-content:space-between"><strong>Amount:</strong><span>€${(cp.amount_euro||0).toFixed(2)}</span></div>
+                    <div style="margin-top:8px">
+                        <div style="background:#eee;border-radius:8px;overflow:hidden;height:18px">
+                            <div style="width:${progressPercent}%;background:linear-gradient(90deg,#28a745,#20c997);height:100%;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:12px">
+                                ${progressPercent}%
+                            </div>
+                        </div>
+                    </div>
+                ` : ''}
+            </div>
+        `;
+        chargingPointsContainer.appendChild(el);
+    }
+}
+
+function updateDriverStatus(driver) {
+    const d = driver || {status:'IDLE', current_cp: null};
+    driverStatusText.textContent = d.status || 'IDLE';
+    driverStatusText.className = d.status === 'CHARGING' ? 'driver-status-value charging' : 'driver-status-value';
+    driverCpText.textContent = d.current_cp || 'None';
+}
+
+function updateStatistics() {
+    fetch(`${API_URL}/api/stats`, {cache: "no-store"})
+        .then(r => r.json())
+        .then(stats => {
+            document.getElementById('stat-total-cps').textContent = stats.total_cps || 0;
+            document.getElementById('stat-active-charges').textContent = stats.active_charges || 0;
+            document.getElementById('stat-total-energy').textContent = (stats.total_energy || 0).toFixed(2);
+            document.getElementById('stat-total-revenue').textContent = `€${(stats.total_revenue || 0).toFixed(2)}`;
+        })
+        .catch(err => console.warn('stats fetch failed', err));
+}
+
+// Driver actions
+async function sendDriverAction(action, cpId = null, kwhNeeded = 10) {
+    const payload = { driver_id: DRIVER_ID, action: action, cp_id: cpId, kwh_needed: kwhNeeded };
+    try {
+        const res = await fetch(`${API_URL}/api/driver_action`, {
+            method: 'POST',
+            headers: {'Content-Type':'application/json'},
+            body: JSON.stringify(payload)
+        });
+        const result = await res.json();
+        if (res.ok && result.success) {
+            logDriver(`✓ ${action} sent successfully`, 'success');
+        } else {
+            logDriver(`✗ ${action} failed: ${result.error || 'server error'}`, 'error');
+        }
+    } catch (err) {
+        logDriver(`✗ Network error: ${err.message}`, 'error');
+    }
+}
+
+// Modal and driver UI helpers
+function showRequestModal() {
+    const availableCPs = Object.entries(latestDashboardData.charging_points || {}).filter(([id,c]) => c.state === 'ACTIVATED' || c.state === 'activated' );
+    if (!availableCPs.length) { logDriver('✗ No available charging points', 'warning'); return; }
+    const select = document.getElementById('cp-select');
+    select.innerHTML = '';
+    availableCPs.forEach(([id, cp]) => {
+        const opt = document.createElement('option'); opt.value = id; opt.textContent = `${id} (${(cp.price_per_kwh||0).toFixed(2)}€/kWh)`;
+        select.appendChild(opt);
+    });
+    document.getElementById('requestModal').style.display = 'block';
+}
+function closeModal(){ document.getElementById('requestModal').style.display = 'none'; }
+function confirmRequest(){
+    const cpId = document.getElementById('cp-select').value;
+    const kwhNeeded = parseFloat(document.getElementById('kwh-input').value) || 10;
+    if(!cpId){ logDriver('✗ Please select a CP', 'warning'); return; }
+    logDriver(`Requesting ${kwhNeeded} kWh at ${cpId}...`, 'info');
+    sendDriverAction('request_charge', cpId, kwhNeeded);
+    closeModal();
+}
+function driverViewStatus(){ const d = latestDashboardData.drivers[DRIVER_ID] || {status:'IDLE'}; logDriver(`Status: ${d.status}${d.current_cp? ' at '+d.current_cp:''}`,'info'); }
+function driverViewCPs(){ const arr = Object.entries(latestDashboardData.charging_points||{}); if(!arr.length){ logDriver('No CPs found','warning'); return; } arr.forEach(([id,cp])=> logDriver(`• ${id} - ${(cp.price_per_kwh||0).toFixed(2)}€/kWh`,'info')); }
+function driverFinishCharging(){ const d = latestDashboardData.drivers[DRIVER_ID]||{}; if(d.status !== 'CHARGING' || !d.current_cp){ logDriver('✗ Not currently charging','warning'); return; } sendDriverAction('finish_charging', d.current_cp); }
+
+// Terminal logging helper
+function logDriver(msg, type='info'){ const el = document.createElement('div'); el.className = `driver-log-line ${type}`; el.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`; driverTerminal.appendChild(el); driverTerminal.scrollTop = driverTerminal.scrollHeight; }
+
+// Polling fallback
+let pollHandle = setInterval(fetchDashboardData, POLLING_INTERVAL);
+fetchDashboardData();
+
+// Server-Sent Events (SSE) for instant updates
+if (window.EventSource) {
+    try {
+        const es = new EventSource(`${API_URL}/api/stream`);
+        es.onopen = () => {
+            console.log('[SSE] connected');
+            connectionStatusEl.textContent = '🟢 Connected to Central';
+            connectionStatusEl.classList.add('online');
+        };
+        es.onmessage = (e) => {
+            // Received a push — refresh snapshot immediately
+            console.log('[SSE] message', e.data);
+            fetchDashboardData();
+        };
+        es.onerror = (err) => {
+            console.warn('[SSE] error or closed', err);
+            // allow fallback polling to continue; browser will auto-retry EventSource
+            connectionStatusEl.textContent = '🔴 SSE disconnected — using polling';
+            connectionStatusEl.classList.remove('online');
+        };
+    } catch (err) {
+        console.warn('SSE setup failed', err);
+    }
+} else {
+    console.warn('EventSource not supported, using polling only');
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,76 @@
+services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.3.0
+    container_name: distributed_zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+    networks:
+      - distributed_net
+
+  kafka:
+    image: confluentinc/cp-kafka:7.3.0
+    container_name: distributed_kafka
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://172.21.42.11:9092  # <-- YOUR HOST PC IP
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      ALLOW_PLAINTEXT_LISTENER: "yes"
+    ports:
+      - "9092:9092"
+    networks:
+      - distributed_net
+
+  central:
+    build:
+      context: .
+      dockerfile: Dockerfile.central
+    container_name: distributed_central
+    depends_on:
+      - kafka
+    environment:
+      KAFKA_BROKER: kafka:9092
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./data:/app/data
+    networks:
+      - distributed_net
+    stdin_open: true
+    tty: true
+
+  web_ui:
+    build:
+      context: .
+      dockerfile: Dockerfile.ui
+    container_name: evcharging_ui
+    depends_on:
+      central:
+        condition: service_healthy
+    environment:
+      CENTRAL_HOST: central
+      CENTRAL_PORT: 5000
+      FLASK_ENV: production
+    ports:
+      - "8000:8000"
+    networks:
+      - evcharging_net
+    stdin_open: true
+    tty: true
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+
+networks:
+  distributed_net:
+    driver: bridge
