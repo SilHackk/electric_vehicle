@@ -56,7 +56,6 @@ class CentralUIClient:
                         self._handle_message(fields)
                 except:
                     traceback.print_exc()
-
     def _handle_message(self, fields):
         t = fields[0]
         if t == "FULL_STATE":
@@ -64,6 +63,22 @@ class CentralUIClient:
             drivers = ast.literal_eval(fields[2]) if len(fields) > 2 else []
             hist = ast.literal_eval(fields[3]) if len(fields) > 3 else []
             self.state.set_full_state(cps, drivers, hist)
+
+        elif t == "LOG" or t == MessageTypes.LOG if hasattr(MessageTypes, "LOG") else False:
+            # Expected fields: ["LOG", source, text, timestamp?]
+            try:
+                source = fields[1] if len(fields) > 1 else "UNKNOWN"
+                text = fields[2] if len(fields) > 2 else ""
+                ts = fields[3] if len(fields) > 3 else None
+                entry = {
+                    "source": source,
+                    "text": text,
+                    "time": ts or time.time()
+                }
+                self.state.add_log(entry)
+            except Exception:
+                traceback.print_exc()
+
         elif t == MessageTypes.SUPPLY_UPDATE and len(fields) >= 4:
             cp_id = fields[1]
             inc = float(fields[2])
@@ -72,6 +87,7 @@ class CentralUIClient:
             cp = snap["charging_points"].get(cp_id, {})
             new_kwh = cp.get("kwh_delivered", 0) + inc
             self.state.update_cp(cp_id, {"kwh_delivered": new_kwh, "amount_euro": amt})
+
         elif t == MessageTypes.SUPPLY_END and len(fields) >= 5:
             cp_id, driver_id = fields[1], fields[2]
             total_kwh, total_amount = float(fields[3]), float(fields[4])
@@ -89,10 +105,12 @@ class CentralUIClient:
                 "total_amount": total_amount,
                 "timestamp": time.time()
             })
+
         elif t == "DRIVER_START" and len(fields) >= 3:
             cp_id, driver_id = fields[1], fields[2]
             self.state.update_cp(cp_id, {"state": "SUPPLYING", "current_driver": driver_id})
             self.state.update_driver(driver_id, {"status": "CHARGING", "current_cp": cp_id})
+
         elif t == "DRIVER_STOP" and len(fields) >= 3:
             cp_id, driver_id = fields[1], fields[2]
             self.state.update_cp(cp_id, {

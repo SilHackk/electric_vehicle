@@ -6,6 +6,7 @@ import socket
 import threading
 import time
 import sys
+import json
 from datetime import datetime
 from config import CP_BASE_PORT, CP_STATES, COLORS, SUPPLY_UPDATE_INTERVAL
 from shared.protocol import Protocol
@@ -59,6 +60,7 @@ class EVCPEngine:
                 )
             )
             self.central_socket.send(register_msg)
+            self.send_log("Registered with CENTRAL")
             print(f"[{self.cp_id}] Registered with CENTRAL")
 
             # Start listening for messages from CENTRAL
@@ -200,7 +202,17 @@ class EVCPEngine:
                 }
 
                 print(f"\n[{self.cp_id}] ✅ Charging authorized")
+                self.send_log(f"Charging authorized for driver {driver_id}, kWh={kwh_needed}")
                 print(f"[{self.cp_id}] → IN USE - CHARGING\n")
+    def send_log(self, text):
+            """Send a LOG message to CENTRAL so UI can receive it."""
+            try:
+                if self.central_socket:
+                    msg = Protocol.build_message("LOG", self.cp_id, str(text))
+                    self.central_socket.send(Protocol.encode(msg))
+            except Exception as e:
+                # keep local print as fallback
+                print(f"[{self.cp_id}] Failed to send log: {e}")
 
     def _handle_stop_command(self):
         """Handle STOP command from CENTRAL"""
@@ -251,7 +263,8 @@ class EVCPEngine:
 
                 print(f"\n[{self.cp_id}] Supply ended by CENTRAL")
                 print(f"[{self.cp_id}] {kwh_delivered:.3f} kWh, {total_amount:.2f}€")
-
+                self.send_log(f"Supply ended: {kwh_delivered:.3f} kWh, {total_amount:.2f}€")
+                
                 end_msg = Protocol.encode(
                     Protocol.build_message(
                         "SUPPLY_END", self.cp_id, driver_id,
@@ -342,7 +355,7 @@ class EVCPEngine:
 
                         # Display charging progress
                         print(f"[{self.cp_id}] {session['kwh_delivered']:.3f} kWh | {amount:.2f}€ (IN USE - CHARGING)")
-
+                        self.send_log(f"{session['kwh_delivered']:.3f} kWh | {amount:.2f}€ (CHARGING)")
                         try:
                             update_msg = Protocol.encode(
                                 Protocol.build_message(

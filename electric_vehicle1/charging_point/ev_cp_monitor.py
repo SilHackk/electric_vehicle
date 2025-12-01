@@ -56,6 +56,7 @@ class EVCPMonitor:
                 self.engine_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 self.engine_socket.connect((self.engine_host, self.engine_port))
                 print(f"[{self.cp_id} Monitor] ✅ Connected to Engine")
+                self.send_log("Connected to Engine")
                 return True
             except Exception as e:
                 print(f"[{self.cp_id} Monitor] Attempt {attempt + 1}/{max_retries} failed: {e}")
@@ -85,6 +86,7 @@ class EVCPMonitor:
                 self.central_socket.send(register_msg)
 
                 print(f"[{self.cp_id} Monitor] ✅ Connected to CENTRAL")
+                self.send_log("Connected to CENTRAL")
                 return True
             except Exception as e:
                 print(f"[{self.cp_id} Monitor] Attempt {attempt + 1}/{max_retries} failed: {e}")
@@ -132,6 +134,7 @@ class EVCPMonitor:
                                 print(f"\n╔{'═'*68}╗")
                                 print(f"║{' '*68}║")
                                 print(f"║  🚗  DRIVER CONNECTED - CHARGING SESSION STARTED  {'⚡':<22}║")
+                                self.send_log(f"Driver {driver_id} started charging")
                                 print(f"║{' '*68}║")
                                 print(f"╠{'═'*68}╣")
                                 print(f"║  📅 Start Time: {self.charge_start_time.strftime('%H:%M:%S'):<50}║")
@@ -155,6 +158,7 @@ class EVCPMonitor:
                                 print(f"\n╔{'═'*68}╗")
                                 print(f"║{' '*68}║")
                                 print(f"║  🎉  CHARGING COMPLETE - 100% REACHED!  {'🔋':<26}║")
+                                self.send_log("Charging complete")
                                 print(f"║{' '*68}║")
                                 print(f"╚{'═'*68}╝\n")
 
@@ -174,6 +178,7 @@ class EVCPMonitor:
                                         print(f"\n╔{'═'*68}╗")
                                         print(f"║{' '*68}║")
                                         print(f"║  ✅  VEHICLE UNPLUGGED - SESSION COMPLETE  {'🔌':<24}║")
+                                        self.send_log(f"Driver {driver_id} unplugged (final {final_progress}%)")
                                         print(f"║{' '*68}║")
                                         print(f"╠{'═'*68}╣")
                                         print(f"║  🔋 Final Charge: 100%{' '*44}║")
@@ -203,6 +208,15 @@ class EVCPMonitor:
 
         except Exception as e:
             print(f"[{self.cp_id} Monitor] CENTRAL connection lost: {e}")
+
+    def send_log(self, text):
+        """Send a LOG message to CENTRAL."""
+        try:
+            if self.central_socket:
+                msg = Protocol.build_message("LOG", self.cp_id, str(text))
+                self.central_socket.send(Protocol.encode(msg))
+        except Exception as e:
+            print(f"[{self.cp_id} Monitor] Failed to send log: {e}")
 
     def _monitor_progress(self):
         """Monitor and display charging progress"""
@@ -284,6 +298,7 @@ class EVCPMonitor:
                                         print(f"\n╔{'═'*68}╗")
                                         print(f"║{' '*68}║")
                                         print(f"║  ✅  ENGINE RECOVERED - System operational  {'💚':<24}║")
+                                        self.send_log("ENGINE RECOVERED")
                                         print(f"║{' '*68}║")
                                         print(f"╚{'═'*68}╝\n")
                                         
@@ -324,6 +339,7 @@ class EVCPMonitor:
                     print(f"\n╔{'═'*68}╗")
                     print(f"║{' '*68}║")
                     print(f"║  ⚠️   ENGINE FAULT DETECTED - Critical failure!  {'🔴':<18}║")
+                    self.send_log("ENGINE FAULT detected")
                     print(f"║{' '*68}║")
                     print(f"╠{'═'*68}╣")
                     print(f"║  🔧 Status: Not responding to health checks{' '*23}║")

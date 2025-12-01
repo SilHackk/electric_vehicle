@@ -9,6 +9,7 @@ class UIState:
         self.charging_points = {}
         self.drivers = {}
         self.history = []
+        self.logs = []               # NEW: list of log entries
         self.last_update = time.time()
 
     def _touch(self):
@@ -70,11 +71,28 @@ class UIState:
             self.history = self.history[:100]
             self._touch()
 
+    # NEW: add log entries for UI
+    def add_log(self, entry):
+        """
+        entry: dict with keys {source, text, time}
+        """
+        with self.lock:
+            try:
+                # insert at beginning
+                self.logs.insert(0, entry)
+                # keep bounded size
+                if len(self.logs) > 500:
+                    self.logs = self.logs[:500]
+            except Exception:
+                pass
+            self._touch()
+
     def snapshot(self):
         with self.lock:
             return {
                 "charging_points": deepcopy(self.charging_points),
                 "drivers": deepcopy(self.drivers),
                 "history": deepcopy(self.history),
+                "logs": deepcopy(self.logs),   # NEW
                 "timestamp": self.last_update
             }

@@ -119,4 +119,6 @@ class MessageTypes:
     # MONITOR to ENGINE
     HEALTH_CHECK = "HEALTH_CHECK"           # Health check request
     HEALTH_OK = "HEALTH_OK"                 # Health check response OK
-    HEALTH_KO = "HEALTH_KO"                 # Health check response KO
+    HEALTH_KO = "HEALTH_KO"    
+    
+    LOG = "LOG"             # Health check response KO

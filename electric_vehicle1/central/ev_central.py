@@ -6,6 +6,7 @@ import socket
 import threading
 import time
 import sys
+import json  # add near other imports
 from datetime import datetime
 from config import (
     CENTRAL_HOST, CENTRAL_PORT, CP_STATES, COLORS
@@ -30,7 +31,8 @@ class EVCentral:
         self.drivers = {}             
         self.active_connections = {}  
         self.entity_to_socket = {}    
-        self.monitors = {}            
+        self.monitors = {}    
+        self.logs = []          
 
         # Kafka client
         self.kafka = KafkaClient("EV_Central")
@@ -65,6 +67,31 @@ class EVCentral:
                 print(f"  - {cp_id} at ({cp_data['latitude']}, {cp_data['longitude']})")
         else:
             print("[EV_Central] No stored charging points found")
+        
+    def add_log(self, source, text):
+        """Store a log entry and broadcast to UI monitor if connected."""
+        timestamp = datetime.now().isoformat()
+        entry = {
+            "time": timestamp,
+            "source": str(source),
+            "text": str(text)
+        }
+        # keep bounded size
+        self.logs.append(entry)
+        if len(self.logs) > 500:
+            self.logs = self.logs[-500:]
+
+        # also print to console (optional)
+        print(f"[LOG] {timestamp} {source}: {text}")
+
+        # broadcast to UI (if connected)
+        try:
+            # send structured log: event_type LOG, cp_id/source, text (single field)
+            if "WEB_UI" in self.monitors:
+                msg = Protocol.build_message("LOG", entry["source"], entry["text"], entry["time"])
+                self.monitors["WEB_UI"].send(Protocol.encode(msg))
+        except Exception as e:
+            print(f"[EV_Central] ⚠️ Failed to forward log to WEB_UI: {e}")
 
     def start(self):
         """Start the central system"""
@@ -162,14 +189,30 @@ class EVCentral:
             self._handle_fault(fields, client_socket)
         elif msg_type == MessageTypes.RECOVERY:
             self._handle_recovery(fields, client_socket)
+        elif msg_type == "LOG" or msg_type == MessageTypes.LOG if hasattr(MessageTypes, 'LOG') else False:
+            # Expected fields: ["LOG", source, text, timestamp?]
+            try:
+                source = fields[1] if len(fields) > 1 else "UNKNOWN"
+                text = fields[2] if len(fields) > 2 else ""
+                timestamp = fields[3] if len(fields) > 3 else None
+                self.add_log(source, text)
+            except Exception as e:
+                print(f"[EV_Central] Failed to process LOG message: {e}")
 
-    def _broadcast_to_ui(self, event_type, cp_id, driver_id=None):
+    def _broadcast_to_ui(self, event_type, cp_id, driver_id=None, payload=None):
+        """
+        Broadcast a message to WEB_UI monitor socket.
+        payload: optional string or JSON-able data that will be sent as extra fields.
+        """
         if "WEB_UI" in self.monitors:
             try:
-                msg = Protocol.encode(
-                    Protocol.build_message(event_type, cp_id, driver_id or "")
-                )
-                self.monitors["WEB_UI"].send(msg)
+                # If payload is present, include it as extra fields (convert to string)
+                if payload is not None:
+                    # build_message can accept multiple args — we pass payload as string
+                    msg = Protocol.build_message(event_type, cp_id, driver_id or "", json.dumps(payload))
+                else:
+                    msg = Protocol.build_message(event_type, cp_id, driver_id or "")
+                self.monitors["WEB_UI"].send(Protocol.encode(msg))
             except Exception as e:
                 print(f"[EV_Central] ⚠️ Failed to broadcast {event_type} to UI: {e}")
 
@@ -204,13 +247,13 @@ class EVCentral:
             self.storage.save_cp(entity_id, lat, lon, price, CP_STATES["ACTIVATED"])
 
             print(f"[EV_Central] ✅ CP Registered: {entity_id} at ({lat}, {lon}) - Saved to file")
-            
+            self.add_log("EV_Central", f"CP Registered: {entity_id} at ({lat}, {lon})")
             self.kafka.publish_event("system_events", "CP_REGISTERED", {
                 "cp_id": entity_id,
                 "location": (lat, lon),
                 "price": price
             })
-
+            
             response = Protocol.encode(
                 Protocol.build_message(MessageTypes.ACKNOWLEDGE, entity_id, "OK")
             )
@@ -230,7 +273,8 @@ class EVCentral:
             self.storage.save_driver(entity_id, "IDLE")
 
             print(f"[EV_Central] ✅ Driver Registered: {entity_id} - Saved to file")
-            
+            self.add_log(f"[EV_Central] ✅ Driver Registered: {entity_id} - Saved to file")
+
             response = Protocol.encode(
                 Protocol.build_message(MessageTypes.ACKNOWLEDGE, entity_id, "OK")
             )
@@ -274,6 +318,7 @@ class EVCentral:
         """Handle driver charging request"""
         if len(fields) < 4:
             print(f"[EV_Central] ⚠️  Invalid REQUEST_CHARGE: {fields}")
+            self.add_log("EV_Central", f"Invalid REQUEST_CHARGE from {client_id}: {fields}")
             return
 
         driver_id = fields[1]
@@ -315,6 +360,7 @@ class EVCentral:
             self.drivers[driver_id]["current_cp"] = cp_id
 
         print(f"[EV_Central] ✅ Charge authorized: Driver {driver_id} → CP {cp_id}")
+        self.add_log("EV_Central", f"Charge authorized Driver {driver_id} -> {cp_id}")
 
         # Send AUTHORIZE to driver
         response = Protocol.encode(
@@ -358,6 +404,7 @@ class EVCentral:
         """Handle real-time supply updates from CP"""
         if len(fields) < 4:
             print(f"[EV_Central] ⚠️  Invalid SUPPLY_UPDATE: {fields}")
+            self.add_log("[EV_Central] ⚠️  Invalid SUPPLY_UPDATE: {fields}")
             return
 
         cp_id = fields[1]
@@ -389,6 +436,7 @@ class EVCentral:
                                 print(f"[EV_Central] Failed to notify monitor of completion: {e}")
                 
                 print(f"[EV_Central] 📊 CP {cp_id}: {cp['kwh_delivered']:.3f} kWh, {amount:.2f}€")
+                self.add_log(cp_id, f"{cp['kwh_delivered']:.3f} kWh, {amount:.2f}€")
 
         # Forward update to driver
         if driver_id and driver_id in self.entity_to_socket:
@@ -434,6 +482,7 @@ class EVCentral:
         self.storage.update_driver_stats(driver_id, total_amount)
 
         print(f"\n[EV_Central] ✅ {driver_id} unplugged from {cp_id}")
+        self.add_log("EV_Central", f"{driver_id} unplugged from {cp_id} - {total_kwh} kWh")
         print(f"[EV_Central]    → {total_kwh:.2f} kWh, {total_amount:.2f}€, {duration_seconds}s")
         print(f"[EV_Central]    → CP {cp_id} now ACTIVATED\n")
 
@@ -601,6 +650,7 @@ class EVCentral:
                         self.drivers[driver_id]["current_cp"] = None
 
         print(f"[EV_Central] ⚠️ FAULT reported for CP {cp_id}")
+        self.add_log("EV_Central", f"FAULT {cp_id}")
         
         if was_supplying and driver_id:
             print(f"[EV_Central] ⚠️  Charging session interrupted for driver {driver_id}")
@@ -628,6 +678,7 @@ class EVCentral:
                 self.charging_points[cp_id]["state"] = CP_STATES["ACTIVATED"]
 
         print(f"[EV_Central] ✅ CP {cp_id} recovered")
+        self.add_log("EV_Central", f"RECOVERY {cp_id}")
         self.kafka.publish_event("system_events", "CP_RECOVERED", {"cp_id": cp_id})
 
     def _handle_query_available_cps(self, fields, client_socket, client_id):
