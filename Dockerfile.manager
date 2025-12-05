@@ -1,0 +1,19 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install Docker CLI (to control other containers)
+RUN apt-get update && \
+    apt-get install -y docker.io && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install Python dependencies
+RUN pip install --no-cache-dir requests
+
+# Copy charging_point folder (contains cp_manager.py)
+COPY charging_point/ charging_point/
+
+ENV PYTHONUNBUFFERED=1
+
+# Run cp_manager.py from charging_point folder
+CMD ["python", "charging_point/ev_cp_manager.py"]

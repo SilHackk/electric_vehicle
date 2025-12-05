@@ -36,18 +36,36 @@ services:
       retries: 5
 
   # ============================================================================
+  # EV_Registry - REST API
+  # ============================================================================
+  registry:
+    image: python:3.11-slim
+    container_name: evcharging_registry
+    working_dir: /app
+    command: sh -c "pip install flask flask-cors && python registry/ev_registry.py"
+    volumes:
+      - ./registry:/app/registry
+      - ./data:/app/data
+    ports:
+      - "5001:5001"
+    networks:
+      - evcharging_net
+
+  # ============================================================================
   # CENTRAL - Control Center
   # ============================================================================
   central:
     build:
       context: .
       dockerfile: Dockerfile.central
+    image: evcharging-central
     container_name: evcharging_central
     depends_on:
-      kafka:
-        condition: service_healthy
+      registry:
+        condition: service_started
     environment:
       KAFKA_BROKER: kafka:9092
+      REGISTRY_URL: http://registry:5001
     ports:
       - "5000:5000"
     volumes:
@@ -56,19 +74,6 @@ services:
       - evcharging_net
     stdin_open: true
     tty: true
-    healthcheck:
-      # The central service speaks a custom TCP protocol on port 5000 (not HTTP),
-      # so use a lightweight Python TCP connect healthcheck instead of curl.
-      test: ["CMD-SHELL", "python -c \"import socket,sys; s=socket.socket(); s.settimeout(2);\
-        \
-        try:\
-            s.connect(('localhost',5000)); s.close(); sys.exit(0)\
-        except Exception:\
-            sys.exit(1)\""]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
 
   # ============================================================================
   # Charging Point 1 - Engine + Monitor
@@ -77,6 +82,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.cp
+    image: evcharging-cp
     container_name: evcharging_cp_engine_1
     depends_on:
       - central
@@ -95,6 +101,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.cp
+    image: evcharging-cp
     container_name: evcharging_cp_monitor_1
     depends_on:
       - central
@@ -108,49 +115,13 @@ services:
     tty: true
 
   # ============================================================================
-  # Charging Point 2 - Engine + Monitor
-  # ============================================================================
-  cp_engine_2:
-    build:
-      context: .
-      dockerfile: Dockerfile.cp
-    container_name: evcharging_cp_engine_2
-    depends_on:
-      - central
-      - kafka
-    environment:
-      KAFKA_BROKER: kafka:9092
-    command: python charging_point/ev_cp_engine.py CP-002 40.4 -3.2 0.35 central 5000
-    ports:
-      - "6002:6002"
-    networks:
-      - evcharging_net
-    stdin_open: true
-    tty: true
-
-  cp_monitor_2:
-    build:
-      context: .
-      dockerfile: Dockerfile.cp
-    container_name: evcharging_cp_monitor_2
-    depends_on:
-      - cp_engine_2
-      - central
-    environment:
-      KAFKA_BROKER: kafka:9092
-    command: python charging_point/ev_cp_monitor.py CP-002 evcharging_cp_engine_2 6002 central 5000
-    networks:
-      - evcharging_net
-    stdin_open: true
-    tty: true
-
-  # ============================================================================
   # Driver 1
   # ============================================================================
   driver_1:
     build:
       context: .
       dockerfile: Dockerfile.driver
+    image: evcharging-driver
     container_name: evcharging_driver_1
     depends_on:
       - kafka 
@@ -170,6 +141,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.driver
+    image: evcharging-driver
     container_name: evcharging_driver_2
     depends_on:
       - kafka 
@@ -189,17 +161,46 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.driver
+    image: evcharging-driver
     container_name: evcharging_driver_auto
     depends_on:
       - kafka 
       - central
     environment:
       KAFKA_BROKER: kafka:9092
-    command: sh -c 'sleep 5 && python driver/ev_driver_auto.py DRIVER-AUTO central 5000 data/charging_requests.txt'
+    command: sh -c 'sleep 7 && python driver/ev_driver_auto.py DRIVER-AUTO central 5000 data/charging_requests.txt'
     volumes:
       - ./data:/app/data
     networks:
       - evcharging_net
+    stdin_open: true
+    tty: true
+
+  # ============================================================================
+  # CP Manager - Interactive Control Panel
+  # ============================================================================
+  cp_manager:
+    build:
+      context: .
+      dockerfile: Dockerfile.manager
+    image: evcharging-manager
+    container_name: evcharging_cp_manager
+    depends_on:
+      - central
+      - registry
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock  # Access to Docker
+    networks:
+      - evcharging_net
+    stdin_open: true
+    tty: true
+
+# ============================================================================
+# Network definition
+# ============================================================================
+networks:
+  evcharging_net:
+    driver: bridge
   # ============================================================================
   # Website
   # ============================================================================

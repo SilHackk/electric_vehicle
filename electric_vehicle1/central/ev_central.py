@@ -6,7 +6,11 @@ import socket
 import threading
 import time
 import sys
-import json  # add near other imports
+import json  
+
+import requests
+from config import REGISTRY_URL, REGISTRY_POLL_INTERVAL
+
 from datetime import datetime
 from config import (
     CENTRAL_HOST, CENTRAL_PORT, CP_STATES, COLORS

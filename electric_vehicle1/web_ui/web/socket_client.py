@@ -118,20 +118,33 @@ class CentralUIClient:
                 "kwh_delivered": 0.0, "amount_euro": 0.0
             })
             self.state.update_driver(driver_id, {"status": "IDLE", "current_cp": None})
+        
+        elif t == MessageTypes.AUTHORIZE:
+            # Driver got authorized - update state
+            driver_id = fields[1]
+            cp_id = fields[2]
+            self.state.update_driver(driver_id, {"status": "CHARGING", "current_cp": cp_id})
+            self.state.update_cp(cp_id, {"state": "SUPPLYING", "current_driver": driver_id})
 
+        elif t == MessageTypes.DENY:
+            print(f"[socket_client] Request denied: {fields}")
     def send_command(self, command, driver_id=None, cp_id=None, kwh_needed=10):
-        if not self.sock:
-            return False
         with self.lock:
-            if command == "REQUEST_CHARGE":
-                msg = Protocol.build_message(MessageTypes.REQUEST_CHARGE, driver_id, cp_id, kwh_needed)
-            elif command == "FINISH_CHARGE":
-                msg = Protocol.build_message(MessageTypes.END_CHARGE, driver_id, cp_id)
-            else:
+            if not self.sock:
+                print("[socket_client] Socket not connected")
                 return False
-            self.sock.send(Protocol.encode(msg))
-            return True
-
+            try:
+                if command == "REQUEST_CHARGE":
+                    msg = Protocol.build_message(MessageTypes.REQUEST_CHARGE, driver_id, cp_id, kwh_needed)
+                elif command == "FINISH_CHARGE":
+                    msg = Protocol.build_message(MessageTypes.END_CHARGE, driver_id, cp_id)
+                else:
+                    return False
+                self.sock.send(Protocol.encode(msg))
+                return True
+            except Exception as e:
+                print(f"[socket_client] send_command error: {e}")
+                return False
     def _close_socket(self):
         if self.sock:
             try: self.sock.close()
