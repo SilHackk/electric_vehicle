@@ -195,12 +195,6 @@ services:
     stdin_open: true
     tty: true
 
-# ============================================================================
-# Network definition
-# ============================================================================
-networks:
-  evcharging_net:
-    driver: bridge
   # ============================================================================
   # Website
   # ============================================================================
@@ -226,6 +220,19 @@ networks:
       timeout: 5s
       retries: 3
     restart: always
+
+# Weather Control Office
+  weather:
+    build:
+      context: .
+      dockerfile: Dockerfile.weather
+    container_name: evcharging_weather
+    environment:
+      OPENWEATHER_API_KEY: "${OPENWEATHER_API_KEY}"
+    networks:
+      - evcharging_net
+    stdin_open: true
+    tty: true
 
 # ============================================================================
 # Network definition

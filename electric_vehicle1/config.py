@@ -50,3 +50,17 @@ WAIT_BETWEEN_REQUESTS = 4
 
 REGISTRY_URL = os.getenv("REGISTRY_URL", "http://localhost:5001")
 REGISTRY_POLL_INTERVAL = 10
+
+# Security Configuration
+ENCRYPTION_ENABLED = os.getenv("ENCRYPTION_ENABLED", "False") == "True"
+ENCRYPTION_KEY_LENGTH = 32  # AES-256
+
+# Weather Configuration
+WEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY", "YOUR_API_KEY")
+WEATHER_UPDATE_INTERVAL = 4  # seconds
+WEATHER_SERVICE_URL = os.getenv("WEATHER_SERVICE_URL", "http://localhost:5002")
+WEATHER_ALERT_THRESHOLD = 0  # degrees Celsius - below this = alert
+
+# Audit Configuration
+AUDIT_LOG_FILE = "data/audit_log.txt"
+AUDIT_ENABLED = True

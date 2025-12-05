@@ -18,7 +18,7 @@ from config import (
 from shared.protocol import Protocol, MessageTypes
 from shared.kafka_client import KafkaClient
 from shared.file_storage import FileStorage
-
+from flask import Flask, request, jsonify
 
 class EVCentral:
     def __init__(self, host=CENTRAL_HOST, port=CENTRAL_PORT):
@@ -49,6 +49,40 @@ class EVCentral:
         # Load existing CPs from file on startup
         self._load_stored_cps()
 
+        rest_thread = threading.Thread(target=self.start_rest_api, daemon=True)
+        rest_thread.start()
+        print("[EV_Central] REST API started on port 5003")
+        
+    def start_rest_api(self):
+        """Start Flask REST API for weather alerts"""
+        app = Flask(__name__)
+        
+        @app.route('/api/weather_alert', methods=['POST'])
+        def weather_alert():
+            data = request.json
+            cp_id = data.get('cp_id')
+            alert = data.get('alert')
+            temp = data.get('temperature')
+            
+            self.add_log("EV_Weather", f"{cp_id}: {alert} ({temp}°C)")
+            
+            if alert == "ALERT_COLD":
+                # Shutdown CP
+                with self.lock:
+                    if cp_id in self.charging_points:
+                        self.charging_points[cp_id]["state"] = CP_STATES["OUT_OF_ORDER"]
+                print(f"[EV_Central] ❌ CP {cp_id} OUT OF SERVICE - Cold alert")
+            
+            elif alert == "WEATHER_OK":
+                # Restore CP
+                with self.lock:
+                    if cp_id in self.charging_points:
+                        self.charging_points[cp_id]["state"] = CP_STATES["ACTIVATED"]
+                print(f"[EV_Central] ✅ CP {cp_id} RESTORED - Weather OK")
+            
+            return jsonify({"status": "received"}), 200
+        
+        app.run(host='0.0.0.0', port=5003, debug=False, threaded=True)
     def _load_stored_cps(self):
         """Load charging points from file on startup"""
         stored_cps = self.storage.get_all_cps()
