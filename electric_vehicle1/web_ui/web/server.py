@@ -130,7 +130,9 @@ def api_dashboard():
     As a convenience, if the monitor client is not connected and we have empty state, try a one-shot fetch.
     """
     snap = monitor_state.snapshot() or {}
-
+    if not snap.get('timestamp'):
+        snap['timestamp'] = time.time()
+        
     # Check ui_client socket presence
     try:
         client_sock = getattr(ui_client, 'sock', None)
