@@ -118,16 +118,16 @@ class CentralUIClient:
                 "kwh_delivered": 0.0, "amount_euro": 0.0
             })
             self.state.update_driver(driver_id, {"status": "IDLE", "current_cp": None})
-        
-        elif t == MessageTypes.AUTHORIZE:
-            # Driver got authorized - update state
+        elif t == MessageTypes.AUTHORIZE and len(fields) >= 3:
             driver_id = fields[1]
             cp_id = fields[2]
             self.state.update_driver(driver_id, {"status": "CHARGING", "current_cp": cp_id})
             self.state.update_cp(cp_id, {"state": "SUPPLYING", "current_driver": driver_id})
+            
+        elif t == MessageTypes.DENY and len(fields) >= 3:
+            driver_id = fields[1]
+            self.state.update_driver(driver_id, {"status": "IDLE", "current_cp": None})
 
-        elif t == MessageTypes.DENY:
-            print(f"[socket_client] Request denied: {fields}")
     def send_command(self, command, driver_id=None, cp_id=None, kwh_needed=10):
         with self.lock:
             if not self.sock:

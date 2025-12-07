@@ -52,7 +52,7 @@ class EVCentral:
         rest_thread = threading.Thread(target=self.start_rest_api, daemon=True)
         rest_thread.start()
         print("[EV_Central] REST API started on port 5003")
-        
+
     def start_rest_api(self):
         """Start Flask REST API for weather alerts"""
         app = Flask(__name__)
@@ -132,9 +132,13 @@ class EVCentral:
             print(f"[EV_Central] ⚠️ Failed to forward log to WEB_UI: {e}")
 
     def start(self):
-        """Start the central system"""
         print(f"[EV_Central] Starting on {self.host}:{self.port}")
-
+    
+        # Start registry polling
+        registry_thread = threading.Thread(target=self.poll_registry_loop, daemon=True)
+        registry_thread.start()
+        print("[EV_Central] Registry polling started")
+        
         self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.server_socket.bind((self.host, self.port))
@@ -961,6 +965,35 @@ class EVCentral:
             self.server_socket.close()
         self.kafka.close()
         print("[EV_Central] Shutdown complete")
+
+    def poll_registry_loop(self):
+        """Poll registry every 10 seconds for new CPs"""
+        while self.running:
+            try:
+                time.sleep(REGISTRY_POLL_INTERVAL)
+                response = requests.get(f"{REGISTRY_URL}/list", timeout=5)
+                if response.status_code == 200:
+                    data = response.json()
+                    registry_cps = {cp['cp_id']: cp for cp in data.get('charging_points', [])}
+                    
+                    with self.lock:
+                        for cp_id, cp_data in registry_cps.items():
+                            if cp_id not in self.charging_points:
+                                # New CP found in registry
+                                self.charging_points[cp_id] = {
+                                    "state": CP_STATES["DISCONNECTED"],
+                                    "location": (cp_data['latitude'], cp_data['longitude']),
+                                    "price_per_kwh": float(cp_data.get('price_per_kwh', 0.30)),
+                                    "current_driver": None,
+                                    "kwh_delivered": 0,
+                                    "amount_euro": 0,
+                                    "session_start": None,
+                                    "charging_complete": False
+                                }
+                                print(f"[EV_Central] 📋 Detected new CP from registry: {cp_id}")
+                                self.add_log("EV_Central", f"New CP detected: {cp_id}")
+            except Exception as e:
+                print(f"[EV_Central] Registry poll error: {e}")
 
 
 if __name__ == "__main__":

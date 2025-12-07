@@ -132,7 +132,7 @@ def api_dashboard():
     snap = monitor_state.snapshot() or {}
     if not snap.get('timestamp'):
         snap['timestamp'] = time.time()
-        
+
     # Check ui_client socket presence
     try:
         client_sock = getattr(ui_client, 'sock', None)
@@ -237,42 +237,36 @@ def driver_action():
     driver_id = data.get('driver_id')
     action = data.get('action')
     cp_id = data.get('cp_id')
+    kwh_needed = float(data.get('kwh_needed', 10))
 
     if not driver_id or not action:
         return jsonify({"success": False, "error": "Missing driver_id or action"}), 400
 
-    if not ui_client:
-        logging.warning("[Web UI] driver_action: UI client not initialized or offline")
-        return jsonify({"success": False, "error": "System monitor client is offline."}), 503
-
-    send_cmd = getattr(ui_client, 'send_command', None)
-    if not callable(send_cmd):
-        logging.error("[Web UI] driver_action: ui_client has no send_command method")
-        return jsonify({"success": False, "error": "Central client missing send_command."}), 500
+    if not ui_client or not ui_client.sock:
+        return jsonify({"success": False, "error": "Not connected to Central"}), 503
 
     try:
         if action == 'request_charge':
             if not cp_id:
-                return jsonify({"success": False, "error": "Missing cp_id for request_charge"}), 400
-            send_cmd("REQUEST_CHARGE", driver_id=driver_id, cp_id=cp_id)
-            logging.info(f"[Web UI] Sent REQUEST_CHARGE: driver={driver_id} cp={cp_id}")
+                return jsonify({"success": False, "error": "Missing cp_id"}), 400
+            ui_client.send_command("REQUEST_CHARGE", driver_id=driver_id, cp_id=cp_id, kwh_needed=kwh_needed)
+            logging.info(f"[Web UI] Sent REQUEST_CHARGE: {driver_id} -> {cp_id}")
 
         elif action == 'finish_charging':
+            snap = monitor_state.snapshot()
+            driver = snap.get("drivers", {}).get(driver_id, {})
+            cp_id = cp_id or driver.get("current_cp")
             if not cp_id:
-                driver_info = monitor_state.snapshot().get("drivers", {}).get(driver_id)
-                cp_id = driver_info.get("current_cp") if driver_info else None
-            if not cp_id:
-                return jsonify({"success": False, "error": "Cannot find current CP to finish charge"}), 400
-            send_cmd("FINISH_CHARGE", driver_id=driver_id, cp_id=cp_id)
-            logging.info(f"[Web UI] Sent FINISH_CHARGE: driver={driver_id} cp={cp_id}")
+                return jsonify({"success": False, "error": "No active charging session"}), 400
+            ui_client.send_command("FINISH_CHARGE", driver_id=driver_id, cp_id=cp_id)
+            logging.info(f"[Web UI] Sent FINISH_CHARGE: {driver_id} -> {cp_id}")
         else:
             return jsonify({"success": False, "error": f"Unknown action: {action}"}), 400
 
-        return jsonify({"success": True, "message": f"Action {action} relayed to Central."})
+        return jsonify({"success": True})
     except Exception as e:
-        logging.exception(f"[Web UI] Error processing driver action: {e}")
-        return jsonify({"success": False, "error": "Internal server error during action."}), 500
-
+        logging.exception(f"Error: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
 # --- SSE stream endpoint ---
 @app.route('/api/stream')
 def api_stream():

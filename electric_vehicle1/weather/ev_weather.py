@@ -100,8 +100,27 @@ class EVWeather:
             except Exception as e:
                 print(f"Error: {e}")
     
+    def auto_discover_cps(self):
+        """Fetch CPs from registry and add default locations"""
+        try:
+            response = requests.get(f"{self.central_api_url.replace(':5000', ':5001')}/list", timeout=5)
+            if response.status_code == 200:
+                data = response.json()
+                for cp in data.get('charging_points', []):
+                    cp_id = cp['cp_id']
+                    # Default to Madrid for demo (can parse lat/lon for real cities)
+                    city = "Madrid"
+                    self.add_location(cp_id, city)
+        except Exception as e:
+            print(f"[EV_Weather] Auto-discover failed: {e}")
+
     def run(self):
         """Start weather service"""
+        # Auto-discover CPs on startup
+        print("[EV_Weather] Auto-discovering charging points...")
+        time.sleep(2)  # Wait for registry
+        self.auto_discover_cps()
+        
         monitor_thread = threading.Thread(target=self.monitor_loop, daemon=True)
         monitor_thread.start()
         
