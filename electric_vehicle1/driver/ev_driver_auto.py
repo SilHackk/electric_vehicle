@@ -166,7 +166,6 @@ class EVDriverAuto:
         print(f"\n❌ DENIED at {cp_id} - Reason: {reason}")
         print(f"   Moving to next request...\n")
         
-        # FIX: Always schedule next, don't check fault
         self._schedule_next_request()
 
     def _handle_ticket(self, fields):
@@ -294,13 +293,18 @@ class EVDriverAuto:
     def _schedule_next_request(self):
         """Wait, then process next request"""
         def wait_and_process():
+            # Don't process next if in fault recovery
+            with self.lock:
+                if self.fault_active:
+                    self._in_fault_recovery = True
+                    return
+            
             print(f"⏳ Waiting {WAIT_BETWEEN_REQUESTS} seconds before next request...")
             time.sleep(WAIT_BETWEEN_REQUESTS)
             self.process_next_request()
         
         thread = threading.Thread(target=wait_and_process, daemon=True)
         thread.start()
-
 
     def send_charge_request(self, cp_id, kwh_needed):
         """Send charging request to CENTRAL"""

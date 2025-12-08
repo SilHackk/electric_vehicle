@@ -1,7 +1,4 @@
 services:
-  # ============================================================================
-  # Infrastructure - Zookeeper & Kafka
-  # ============================================================================
   zookeeper:
     image: confluentinc/cp-zookeeper:7.3.0
     container_name: evcharging_zookeeper
@@ -35,9 +32,6 @@ services:
       timeout: 10s
       retries: 5
 
-  # ============================================================================
-  # EV_Registry - REST API
-  # ============================================================================
   registry:
     image: python:3.11-slim
     container_name: evcharging_registry
@@ -51,9 +45,6 @@ services:
     networks:
       - evcharging_net
 
-  # ============================================================================
-  # CENTRAL - Control Center
-  # ============================================================================
   central:
     build:
       context: .
@@ -63,11 +54,14 @@ services:
     depends_on:
       registry:
         condition: service_started
+      kafka:
+        condition: service_healthy
     environment:
       KAFKA_BROKER: kafka:9092
       REGISTRY_URL: http://registry:5001
     ports:
       - "5000:5000"
+      - "5003:5003"  # Weather API
     volumes:
       - ./data:/app/data
     networks:
@@ -75,9 +69,6 @@ services:
     stdin_open: true
     tty: true
 
-  # ============================================================================
-  # Charging Point 1 - Engine + Monitor
-  # ============================================================================
   cp_engine_1:
     build:
       context: .
@@ -86,7 +77,6 @@ services:
     container_name: evcharging_cp_engine_1
     depends_on:
       - central
-      - kafka
     environment:
       KAFKA_BROKER: kafka:9092
     command: python charging_point/ev_cp_engine.py CP-001 40.5 -3.1 0.30 central 5000
@@ -104,7 +94,6 @@ services:
     image: evcharging-cp
     container_name: evcharging_cp_monitor_1
     depends_on:
-      - central
       - cp_engine_1
     environment:
       KAFKA_BROKER: kafka:9092
@@ -114,9 +103,6 @@ services:
     stdin_open: true
     tty: true
 
-  # ============================================================================
-  # Driver 1
-  # ============================================================================
   driver_1:
     build:
       context: .
@@ -124,39 +110,15 @@ services:
     image: evcharging-driver
     container_name: evcharging_driver_1
     depends_on:
-      - kafka 
       - central
     environment:
       KAFKA_BROKER: kafka:9092
-    command: sh -c 'sleep 5 && python driver/ev_driver.py DRIVER-001 central 5000'
+    command: sh -c 'sleep 8 && python driver/ev_driver.py DRIVER-001 central 5000'
     networks:
       - evcharging_net
     stdin_open: true
     tty: true
 
-  # ============================================================================
-  # Driver 2
-  # ============================================================================
-  driver_2:
-    build:
-      context: .
-      dockerfile: Dockerfile.driver
-    image: evcharging-driver
-    container_name: evcharging_driver_2
-    depends_on:
-      - kafka 
-      - central
-    environment:
-      KAFKA_BROKER: kafka:9092
-    command: sh -c 'sleep 6 && python driver/ev_driver.py DRIVER-002 central 5000'
-    networks:
-      - evcharging_net
-    stdin_open: true
-    tty: true
-
-  # ============================================================================
-  # Auto Driver
-  # ============================================================================
   driver_auto:
     build:
       context: .
@@ -164,21 +126,91 @@ services:
     image: evcharging-driver
     container_name: evcharging_driver_auto
     depends_on:
-      - kafka 
       - central
     environment:
       KAFKA_BROKER: kafka:9092
-    command: sh -c 'sleep 7 && python driver/ev_driver_auto.py DRIVER-AUTO central 5000 data/charging_requests.txt'
+    command: sh -c 'sleep 10 && python driver/ev_driver_auto.py DRIVER-AUTO central 5000 data/charging_requests.txt'
     volumes:
       - ./data:/app/data
+    networks:
+      - evcharging_net
+
+  cp_engine_2:
+      build:
+        context: .
+        dockerfile: Dockerfile.cp
+      image: evcharging-cp
+      container_name: evcharging_cp_engine_2
+      depends_on:
+        - central
+      environment:
+        KAFKA_BROKER: kafka:9092
+      command: python charging_point/ev_cp_engine.py CP-002 40.4 -3.2 0.35 central 5000
+      ports:
+        - "6002:6002"
+      networks:
+        - evcharging_net
+      stdin_open: true
+      tty: true
+
+  cp_monitor_2:
+    build:
+      context: .
+      dockerfile: Dockerfile.cp
+    image: evcharging-cp
+    container_name: evcharging_cp_monitor_2
+    depends_on:
+      - cp_engine_2
+    environment:
+      KAFKA_BROKER: kafka:9092
+    command: python charging_point/ev_cp_monitor.py CP-002 evcharging_cp_engine_2 6002 central 5000
+    networks:
+      - evcharging_net
+    stdin_open: true
+    tty: true
+    
+  driver_2:
+      build:
+        context: .
+        dockerfile: Dockerfile.driver
+      image: evcharging-driver
+      container_name: evcharging_driver_2
+      depends_on:
+        - central
+      environment:
+        KAFKA_BROKER: kafka:9092
+      command: sh -c 'sleep 10 && python driver/ev_driver.py DRIVER-002 central 5000'
+  web_ui:
+    build:
+      context: .
+      dockerfile: Dockerfile.ui
+    container_name: evcharging_ui
+    depends_on:
+      - central
+    environment:
+      CENTRAL_HOST: central
+      CENTRAL_PORT: 5000
+    ports:
+      - "8000:8000"
+    networks:
+      - evcharging_net
+    restart: unless-stopped
+
+  weather:
+    build:
+      context: .
+      dockerfile: Dockerfile.weather
+    container_name: evcharging_weather
+    depends_on:
+      - central
+      - registry
+    environment:
+      OPENWEATHER_API_KEY: "${OPENWEATHER_API_KEY:-YOUR_API_KEY}"
     networks:
       - evcharging_net
     stdin_open: true
     tty: true
 
-  # ============================================================================
-  # CP Manager - Interactive Control Panel
-  # ============================================================================
   cp_manager:
     build:
       context: .
@@ -189,54 +221,12 @@ services:
       - central
       - registry
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock  # Access to Docker
+      - /var/run/docker.sock:/var/run/docker.sock
     networks:
       - evcharging_net
     stdin_open: true
     tty: true
 
-  # ============================================================================
-  # Website
-  # ============================================================================
-
-  web_ui:
-    build:
-      context: .
-      dockerfile: Dockerfile.ui
-    container_name: evcharging_ui
-    environment:
-      CENTRAL_HOST: central
-      CENTRAL_PORT: 5000
-      FLASK_ENV: production
-    ports:
-      - "8000:8000"
-    networks:
-      - evcharging_net
-    stdin_open: true
-    tty: true
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-    restart: always
-
-# Weather Control Office
-  weather:
-    build:
-      context: .
-      dockerfile: Dockerfile.weather
-    container_name: evcharging_weather
-    environment:
-      OPENWEATHER_API_KEY: "${OPENWEATHER_API_KEY}"
-    networks:
-      - evcharging_net
-    stdin_open: true
-    tty: true
-
-# ============================================================================
-# Network definition
-# ============================================================================
 networks:
   evcharging_net:
     driver: bridge

@@ -108,12 +108,12 @@
 </div>
 
 <script>
-/* Dashboard JavaScript - works with server.py SSE and REST endpoints */
 const API_URL = window.location.origin;
-const POLLING_INTERVAL = 2000; // fallback polling interval (ms)
+const POLLING_INTERVAL = 1000; // 1 second for faster updates
 const DRIVER_ID = "DRIVER-001";
 
 let latestDashboardData = { charging_points: {}, drivers: {} };
+let lastTimestamp = null;
 
 // Elements
 const chargingPointsContainer = document.getElementById('charging-points');
@@ -123,7 +123,6 @@ const driverTerminal = document.getElementById('driver-terminal');
 const driverStatusText = document.getElementById('driver-status-text');
 const driverCpText = document.getElementById('driver-cp-text');
 
-// Terminal logging
 function logDriver(msg, type='info') {
     const line = document.createElement('div');
     line.className = `driver-log-line ${type}`;
@@ -132,27 +131,31 @@ function logDriver(msg, type='info') {
     driverTerminal.scrollTop = driverTerminal.scrollHeight;
 }
 
-// Init messages
 logDriver("Driver initializing...", "info");
 setTimeout(()=>logDriver("✓ Connected to CENTRAL (local UI)", "success"), 400);
 setTimeout(()=>logDriver("Ready for commands", "success"), 800);
 
-// Helper: fetch dashboard snapshot and render
 async function fetchDashboardData() {
     try {
-        const res = await fetch(`${API_URL}/api/dashboard`, {cache: "no-store"});
+        const res = await fetch(`${API_URL}/api/dashboard?t=${Date.now()}`, {cache: "no-store"});
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
-        latestDashboardData = {
-            charging_points: data.charging_points || {},
-            drivers: data.drivers || {},
-            timestamp: data.timestamp || null
-        };
-        renderDashboard();
-        // Visuals
-        connectionStatusEl.textContent = '🟢 Connected to Central';
-        connectionStatusEl.classList.add('online');
-        lastUpdateEl.textContent = `Last Update: ${latestDashboardData.timestamp ? new Date(latestDashboardData.timestamp * 1000).toLocaleTimeString() : '—'}`;
+        
+        // Check if data actually changed
+        const newTimestamp = data.timestamp;
+        if (newTimestamp !== lastTimestamp) {
+            lastTimestamp = newTimestamp;
+            latestDashboardData = {
+                charging_points: data.charging_points || {},
+                drivers: data.drivers || {},
+                timestamp: newTimestamp
+            };
+            renderDashboard();
+            
+            connectionStatusEl.textContent = '🟢 Connected to Central';
+            connectionStatusEl.classList.add('online');
+            lastUpdateEl.textContent = `Last Update: ${new Date().toLocaleTimeString()}`;
+        }
     } catch (err) {
         console.error('fetchDashboardData error', err);
         connectionStatusEl.textContent = '🔴 Connection Error';
@@ -210,7 +213,6 @@ function updateChargingPoints(cps) {
 function updateDriverStatus(driver) {
     const d = driver || {status:'IDLE', current_cp: null};
     driverStatusText.textContent = d.status || 'IDLE';
-    driverStatusText.className = d.status === 'CHARGING' ? 'driver-status-value charging' : 'driver-status-value';
     driverCpText.textContent = d.current_cp || 'None';
 }
 
@@ -226,7 +228,6 @@ function updateStatistics() {
         .catch(err => console.warn('stats fetch failed', err));
 }
 
-// Driver actions
 async function sendDriverAction(action, cpId = null, kwhNeeded = 10) {
     const payload = { driver_id: DRIVER_ID, action: action, cp_id: cpId, kwh_needed: kwhNeeded };
     try {
@@ -238,6 +239,8 @@ async function sendDriverAction(action, cpId = null, kwhNeeded = 10) {
         const result = await res.json();
         if (res.ok && result.success) {
             logDriver(`✓ ${action} sent successfully`, 'success');
+            // Force immediate update
+            setTimeout(fetchDashboardData, 500);
         } else {
             logDriver(`✗ ${action} failed: ${result.error || 'server error'}`, 'error');
         }
@@ -246,19 +249,24 @@ async function sendDriverAction(action, cpId = null, kwhNeeded = 10) {
     }
 }
 
-// Modal and driver UI helpers
 function showRequestModal() {
     const availableCPs = Object.entries(latestDashboardData.charging_points || {}).filter(([id,c]) => c.state === 'ACTIVATED' || c.state === 'activated' );
     if (!availableCPs.length) { logDriver('✗ No available charging points', 'warning'); return; }
     const select = document.getElementById('cp-select');
     select.innerHTML = '';
     availableCPs.forEach(([id, cp]) => {
-        const opt = document.createElement('option'); opt.value = id; opt.textContent = `${id} (${(cp.price_per_kwh||0).toFixed(2)}€/kWh)`;
+        const opt = document.createElement('option'); 
+        opt.value = id; 
+        opt.textContent = `${id} (${(cp.price_per_kwh||0).toFixed(2)}€/kWh)`;
         select.appendChild(opt);
     });
     document.getElementById('requestModal').style.display = 'block';
 }
-function closeModal(){ document.getElementById('requestModal').style.display = 'none'; }
+
+function closeModal(){ 
+    document.getElementById('requestModal').style.display = 'none'; 
+}
+
 function confirmRequest(){
     const cpId = document.getElementById('cp-select').value;
     const kwhNeeded = parseFloat(document.getElementById('kwh-input').value) || 10;
@@ -267,42 +275,42 @@ function confirmRequest(){
     sendDriverAction('request_charge', cpId, kwhNeeded);
     closeModal();
 }
-function driverViewStatus(){ const d = latestDashboardData.drivers[DRIVER_ID] || {status:'IDLE'}; logDriver(`Status: ${d.status}${d.current_cp? ' at '+d.current_cp:''}`,'info'); }
-function driverViewCPs(){ const arr = Object.entries(latestDashboardData.charging_points||{}); if(!arr.length){ logDriver('No CPs found','warning'); return; } arr.forEach(([id,cp])=> logDriver(`• ${id} - ${(cp.price_per_kwh||0).toFixed(2)}€/kWh`,'info')); }
-function driverFinishCharging(){ const d = latestDashboardData.drivers[DRIVER_ID]||{}; if(d.status !== 'CHARGING' || !d.current_cp){ logDriver('✗ Not currently charging','warning'); return; } sendDriverAction('finish_charging', d.current_cp); }
 
-// Terminal logging helper
-function logDriver(msg, type='info'){ const el = document.createElement('div'); el.className = `driver-log-line ${type}`; el.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`; driverTerminal.appendChild(el); driverTerminal.scrollTop = driverTerminal.scrollHeight; }
+function driverViewStatus(){ 
+    const d = latestDashboardData.drivers[DRIVER_ID] || {status:'IDLE'}; 
+    logDriver(`Status: ${d.status}${d.current_cp? ' at '+d.current_cp:''}`,'info'); 
+}
 
-// Polling fallback
-let pollHandle = setInterval(fetchDashboardData, POLLING_INTERVAL);
+function driverViewCPs(){ 
+    const arr = Object.entries(latestDashboardData.charging_points||{}); 
+    if(!arr.length){ logDriver('No CPs found','warning'); return; } 
+    arr.forEach(([id,cp])=> logDriver(`• ${id} - ${(cp.price_per_kwh||0).toFixed(2)}€/kWh`,'info')); 
+}
+
+function driverFinishCharging(){ 
+    const d = latestDashboardData.drivers[DRIVER_ID]||{}; 
+    if(d.status !== 'CHARGING' || !d.current_cp){ 
+        logDriver('✗ Not currently charging','warning'); 
+        return; 
+    } 
+    sendDriverAction('finish_charging', d.current_cp); 
+}
+
+// Start aggressive polling - 1 second interval
+setInterval(fetchDashboardData, POLLING_INTERVAL);
 fetchDashboardData();
 
-// Server-Sent Events (SSE) for instant updates
+// Also try SSE as backup
 if (window.EventSource) {
     try {
         const es = new EventSource(`${API_URL}/api/stream`);
-        es.onopen = () => {
-            console.log('[SSE] connected');
-            connectionStatusEl.textContent = '🟢 Connected to Central';
-            connectionStatusEl.classList.add('online');
-        };
         es.onmessage = (e) => {
-            // Received a push — refresh snapshot immediately
-            console.log('[SSE] message', e.data);
+            console.log('[SSE] Update received');
             fetchDashboardData();
         };
-        es.onerror = (err) => {
-            console.warn('[SSE] error or closed', err);
-            // allow fallback polling to continue; browser will auto-retry EventSource
-            connectionStatusEl.textContent = '🔴 SSE disconnected — using polling';
-            connectionStatusEl.classList.remove('online');
-        };
     } catch (err) {
-        console.warn('SSE setup failed', err);
+        console.warn('SSE not available, using polling only');
     }
-} else {
-    console.warn('EventSource not supported, using polling only');
 }
 </script>
 </body>

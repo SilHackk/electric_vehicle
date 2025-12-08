@@ -123,7 +123,7 @@ class CentralUIClient:
             cp_id = fields[2]
             self.state.update_driver(driver_id, {"status": "CHARGING", "current_cp": cp_id})
             self.state.update_cp(cp_id, {"state": "SUPPLYING", "current_driver": driver_id})
-            
+        
         elif t == MessageTypes.DENY and len(fields) >= 3:
             driver_id = fields[1]
             self.state.update_driver(driver_id, {"status": "IDLE", "current_cp": None})

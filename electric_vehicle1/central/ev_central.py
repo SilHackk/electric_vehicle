@@ -424,6 +424,17 @@ class EVCentral:
                 print(f"[EV_Central] 📤 Sent AUTHORIZE to CP {cp_id}")
             except Exception as e:
                 print(f"[EV_Central] ⚠️  Failed to send AUTHORIZE to CP: {e}")
+        
+        #Notify WEB
+        if "WEB_UI" in self.monitors:
+            try:
+                ui_msg = Protocol.encode(
+                    Protocol.build_message("DRIVER_START", cp_id, driver_id)
+                )
+                self.monitors["WEB_UI"].send(ui_msg)
+                print(f"[EV_Central] 📤 Notified UI: DRIVER_START")
+            except Exception as e:
+                print(f"[EV_Central] UI notify failed: {e}")
 
         # Notify monitor
         if cp_id in self.monitors:
@@ -490,6 +501,15 @@ class EVCentral:
             except Exception as e:
                 print(f"[EV_Central] Failed to forward update to {driver_id}: {e}")
 
+        if "WEB_UI" in self.monitors:
+            try:
+                ui_msg = Protocol.encode(
+                    Protocol.build_message(MessageTypes.SUPPLY_UPDATE, cp_id, kwh_increment, amount)
+                )
+                self.monitors["WEB_UI"].send(ui_msg)
+            except:
+                pass
+
     def _handle_supply_end(self, fields, client_socket):
         """Handle supply completion from CP"""
         if len(fields) < 5:
@@ -547,6 +567,22 @@ class EVCentral:
                 print(f"[EV_Central] 📤 Notified monitor: {driver_id} unplugged from {cp_id}")
             except Exception as e:
                 print(f"[EV_Central] Failed to notify monitor: {e}")
+
+        if "WEB_UI" in self.monitors:
+            try:
+                # Send supply end
+                ui_msg = Protocol.encode(
+                    Protocol.build_message(MessageTypes.SUPPLY_END, cp_id, driver_id, total_kwh, total_amount)
+                )
+                self.monitors["WEB_UI"].send(ui_msg)
+                # Send driver stop
+                ui_msg2 = Protocol.encode(
+                    Protocol.build_message("DRIVER_STOP", cp_id, driver_id)
+                )
+                self.monitors["WEB_UI"].send(ui_msg2)
+                print(f"[EV_Central] 📤 Notified UI: SUPPLY_END + DRIVER_STOP")
+            except Exception as e:
+                print(f"[EV_Central] UI notify failed: {e}")
 
         self.kafka.publish_event("charging_logs", "CHARGE_COMPLETED", {
             "cp_id": cp_id,
@@ -634,6 +670,16 @@ class EVCentral:
             except Exception as e:
                 print(f"[EV_Central] Failed to notify monitor: {e}")
 
+        if "WEB_UI" in self.monitors:
+            try:
+                ui_msg = Protocol.encode(
+                    Protocol.build_message("DRIVER_STOP", cp_id, driver_id)
+                )
+                self.monitors["WEB_UI"].send(ui_msg)
+                print(f"[EV_Central] 📤 Notified UI: DRIVER_STOP")
+            except Exception as e:
+                print(f"[EV_Central] UI notify failed: {e}")
+
         self.kafka.publish_event("charging_logs", "CHARGE_MANUALLY_ENDED", {
             "cp_id": cp_id,
             "driver_id": driver_id,
@@ -706,7 +752,16 @@ class EVCentral:
                 except Exception as e:
                     print(f"[EV_Central] Failed to notify driver of fault: {e}")
         
-        self.kafka.publish_event("system_events", "CP_FAULT", {"cp_id": cp_id})
+        if "WEB_UI" in self.monitors:
+            try:
+                ui_msg = Protocol.encode(
+                    Protocol.build_message(MessageTypes.FAULT, cp_id)
+                )
+                self.monitors["WEB_UI"].send(ui_msg)
+            except:
+                pass   
+
+            self.kafka.publish_event("system_events", "CP_FAULT", {"cp_id": cp_id})
 
     def _handle_recovery(self, fields, client_socket):
         """Handle recovery notification from CP monitor"""
@@ -720,6 +775,16 @@ class EVCentral:
                 self.charging_points[cp_id]["state"] = CP_STATES["ACTIVATED"]
 
         print(f"[EV_Central] ✅ CP {cp_id} recovered")
+        
+        if "WEB_UI" in self.monitors:
+            try:
+                ui_msg = Protocol.encode(
+                    Protocol.build_message(MessageTypes.RECOVERY, cp_id)
+                )
+                self.monitors["WEB_UI"].send(ui_msg)
+            except:
+                pass
+            
         self.add_log("EV_Central", f"RECOVERY {cp_id}")
         self.kafka.publish_event("system_events", "CP_RECOVERED", {"cp_id": cp_id})
 
@@ -967,7 +1032,7 @@ class EVCentral:
         print("[EV_Central] Shutdown complete")
 
     def poll_registry_loop(self):
-        """Poll registry every 10 seconds for new CPs"""
+        """Poll registry but don't auto-add disconnected CPs to dashboard"""
         while self.running:
             try:
                 time.sleep(REGISTRY_POLL_INTERVAL)
@@ -978,23 +1043,14 @@ class EVCentral:
                     
                     with self.lock:
                         for cp_id, cp_data in registry_cps.items():
+                            # ONLY add if NOT already present
+                            # Don't create DISCONNECTED entries automatically
                             if cp_id not in self.charging_points:
-                                # New CP found in registry
-                                self.charging_points[cp_id] = {
-                                    "state": CP_STATES["DISCONNECTED"],
-                                    "location": (cp_data['latitude'], cp_data['longitude']),
-                                    "price_per_kwh": float(cp_data.get('price_per_kwh', 0.30)),
-                                    "current_driver": None,
-                                    "kwh_delivered": 0,
-                                    "amount_euro": 0,
-                                    "session_start": None,
-                                    "charging_complete": False
-                                }
-                                print(f"[EV_Central] 📋 Detected new CP from registry: {cp_id}")
-                                self.add_log("EV_Central", f"New CP detected: {cp_id}")
+                                # Just log it, don't add to self.charging_points yet
+                                print(f"[EV_Central] 📋 CP {cp_id} registered in registry (not yet connected)")
+                                # It will be added when it actually connects via REGISTER message
             except Exception as e:
                 print(f"[EV_Central] Registry poll error: {e}")
-
 
 if __name__ == "__main__":
     central = EVCentral()
