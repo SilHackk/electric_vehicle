@@ -4,6 +4,11 @@ import time
 from config import WEATHER_API_KEY, WEATHER_UPDATE_INTERVAL, WEATHER_ALERT_THRESHOLD
 from datetime import datetime
 
+WEATHER_API_KEY = "99e654a32d0b0ae64255762e50a81239"
+WEATHER_UPDATE_INTERVAL = 4  # seconds
+WEATHER_SERVICE_URL = os.getenv("WEATHER_SERVICE_URL", "http://localhost:5002")
+WEATHER_ALERT_THRESHOLD = 0  # degrees Celsius - below this = alert
+
 class EVWeather:
     def __init__(self, central_api_url="http://central:5003"):  # FIX: Port 5003
         self.central_api_url = central_api_url
@@ -19,7 +24,7 @@ class EVWeather:
     
     def get_temperature(self, city):
         try:
-            url = f"https://api.openweathermap.org/data/2.5/weather?q={city}&appid={WEATHER_API_KEY}&units=metric"
+            url = f"https://api.openweathermap``.org``/data/2.5/weather?q={city}&appid={WEATHER_API_KEY}&units=metric"
             response = requests.get(url, timeout=5)
             if response.status_code == 200:
                 return response.json()['main']['temp']

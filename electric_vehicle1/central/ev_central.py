@@ -19,7 +19,7 @@ from shared.protocol import Protocol, MessageTypes
 from shared.kafka_client import KafkaClient
 from shared.file_storage import FileStorage
 from flask import Flask, request, jsonify
-
+from shared.encryption import EncryptionManager
 class EVCentral:
     def __init__(self, host=CENTRAL_HOST, port=CENTRAL_PORT):
         self.host = host
@@ -52,6 +52,10 @@ class EVCentral:
         rest_thread = threading.Thread(target=self.start_rest_api, daemon=True)
         rest_thread.start()
         print("[EV_Central] REST API started on port 5003")
+
+    def _is_authenticated(self, cp_id, secret):
+        stored = self.storage.get_cp_secret(cp_id)
+        return stored is not None and stored == secret
 
     def start_rest_api(self):
         """Start Flask REST API for weather alerts"""
@@ -211,6 +215,22 @@ class EVCentral:
         fields = Protocol.parse_message(message)
         msg_type = fields[0]
 
+
+        # CP turi prasidėti "CP"
+        if fields[1].startswith("CP"):  
+            cp_id = fields[1]
+
+            # Secret key ateina formato SECRET=xxxx
+            last_field = fields[-1]
+            secret = last_field.replace("SECRET=","") if last_field.startswith("SECRET=") else None
+
+            # Autentifikavimas
+            if not self._is_authenticated(cp_id, secret):
+                print(f"[EV_Central] ❌ Authentication FAILED for {cp_id}")
+                self.add_log("AUTH-FAIL", f"{cp_id} provided wrong secret")
+                return  # STOP – toliau neapdorojama
+
+
         # print(f"[EV_Central] 📨 Received: {msg_type} from {client_id}")
 
         if msg_type == MessageTypes.REGISTER:
@@ -287,7 +307,10 @@ class EVCentral:
                 self.entity_to_socket[entity_id] = client_socket
 
             self.storage.save_cp(entity_id, lat, lon, price, CP_STATES["ACTIVATED"])
-
+            
+            secret = fields[6] if len(fields) > 6 else None
+            self.storage.save_cp_secret(entity_id, secret)
+            
             print(f"[EV_Central] ✅ CP Registered: {entity_id} at ({lat}, {lon}) - Saved to file")
             self.add_log("EV_Central", f"CP Registered: {entity_id} at ({lat}, {lon})")
             self.kafka.publish_event("system_events", "CP_REGISTERED", {

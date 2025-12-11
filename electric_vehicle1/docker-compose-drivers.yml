@@ -1,4 +1,16 @@
 services:
+  registry:
+    image: python:3.11-slim
+    container_name: evcharging_registry
+    working_dir: /app
+    command: sh -c "pip install flask flask-cors && python registry/ev_registry.py"
+    volumes:
+      - ./registry:/app/registry
+      - ./data:/app/data
+    ports:
+      - "5001:5001"
+    networks:
+      - evcharging_net
   driver_1:
     build:
       context: .

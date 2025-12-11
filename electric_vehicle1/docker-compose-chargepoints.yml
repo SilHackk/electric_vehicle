@@ -58,7 +58,22 @@ services:
       KAFKA_BROKER: 172.21.42.11:9092  # <-- HOST PC IP
     command: python charging_point/ev_cp_monitor.py CP-002 localhost 6002 172.21.42.11 5000
     #                                                                      ^^^^^^^^^^^^
-    #                                                                      HOST PC IP
+    # 
+  weather:
+    build:
+      context: .
+      dockerfile: Dockerfile.weather
+    container_name: evcharging_weather
+    depends_on:
+      - central
+      - registry
+    environment:
+      OPENWEATHER_API_KEY: "${OPENWEATHER_API_KEY:-YOUR_API_KEY}"
+    networks:
+      - evcharging_net
+    stdin_open: true
+    tty: true                                                                     HOST PC IP
     network_mode: host
+    
     stdin_open: true
     tty: true
