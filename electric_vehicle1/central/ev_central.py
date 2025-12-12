@@ -36,7 +36,13 @@ class EVCentral:
         self.active_connections = {}  
         self.entity_to_socket = {}    
         self.monitors = {}    
-        self.logs = []          
+        self.logs = []  
+                
+        self.encryption = EncryptionManager()
+        self.cp_encryption_keys = {}  # cp_id -> simetrinis raktas
+        
+        # NAUJAS: CP kredencialai (saugomi iš Registry)
+        self.cp_credentials = {}  # cp_id -> {"username": ..., "secret": ...}
 
         # Kafka client
         self.kafka = KafkaClient("EV_Central")
@@ -287,6 +293,27 @@ class EVCentral:
         entity_id = fields[2]
 
         if entity_type == "CP":
+            # NAUJAS: Tikrinti kredencialus per Registry API
+            username = fields[6] if len(fields) > 6 else None
+            password = fields[7] if len(fields) > 7 else None
+            
+            if not self._verify_cp_credentials(entity_id, username, password):
+                print(f"[EV_Central] ❌ Authentication FAILED for {entity_id}")
+                self.add_log("AUTH-FAIL", f"{entity_id} wrong credentials")
+                
+                # Siųsti DENY atsakymą
+                deny_msg = Protocol.encode(
+                    Protocol.build_message(MessageTypes.DENY, entity_id, "AUTH_FAILED")
+                )
+                client_socket.send(deny_msg)
+                return  # STOP - nepriimti registracijos
+            
+            # NAUJAS: Generuoti simetrinį šifravimo raktą
+            symmetric_key = self.encryption.generate_key(password)
+            self.cp_encryption_keys[entity_id] = symmetric_key
+            
+            print(f"[EV_Central] 🔐 Generated encryption key for {entity_id}")
+        
             lat = fields[3] if len(fields) > 3 else "0"
             lon = fields[4] if len(fields) > 4 else "0"
             price = float(fields[5]) if len(fields) > 5 else 0.30
@@ -313,6 +340,16 @@ class EVCentral:
             
             print(f"[EV_Central] ✅ CP Registered: {entity_id} at ({lat}, {lon}) - Saved to file")
             self.add_log("EV_Central", f"CP Registered: {entity_id} at ({lat}, {lon})")
+            response = Protocol.encode(
+                Protocol.build_message(
+                    MessageTypes.ACKNOWLEDGE, 
+                    entity_id, 
+                    "OK",
+                    symmetric_key.decode()  # Grąžinti raktą CP
+                )
+            )
+            client_socket.send(response)
+            
             self.kafka.publish_event("system_events", "CP_REGISTERED", {
                 "cp_id": entity_id,
                 "location": (lat, lon),
@@ -378,6 +415,75 @@ class EVCentral:
                     Protocol.build_message(MessageTypes.ACKNOWLEDGE, monitor_cp_id, "MONITOR_OK")
                 )
                 client_socket.send(response)
+
+    def _verify_cp_credentials(self, cp_id, username, password):
+        """Verify CP credentials via Registry API"""
+        try:
+            response = requests.post(
+                f"{REGISTRY_URL}/verify",
+                json={
+                    "cp_id": cp_id,
+                    "username": username,
+                    "password": password
+                },
+                timeout=5
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                if data.get("valid"):
+                    # Saugoti kredencialus atminiuje
+                    self.cp_credentials[cp_id] = {
+                        "username": username,
+                        "secret": password  # Bus naudojamas šifravimui
+                    }
+                    return True
+            
+            return False
+        
+        except Exception as e:
+            print(f"[EV_Central] Registry verification error: {e}")
+            return False
+
+    # 5. NAUJAS METODAS: Pranešimų šifravimas/dešifravimas
+    def _encrypt_message(self, cp_id, message):
+        """Encrypt message for specific CP using their symmetric key"""
+        if cp_id not in self.cp_encryption_keys:
+            return message  # Jei nėra rakto, siųsti nešifruotą
+        
+        key = self.cp_encryption_keys[cp_id]
+        return self.encryption.encrypt(message, key)
+
+    def _decrypt_message(self, cp_id, encrypted_message):
+        """Decrypt message from specific CP"""
+        if cp_id not in self.cp_encryption_keys:
+            return encrypted_message  # Jei nėra rakto, laikyti nešifruotu
+        
+        key = self.cp_encryption_keys[cp_id]
+        try:
+            return self.encryption.decrypt(encrypted_message, key)
+        except Exception as e:
+            print(f"[EV_Central] Decryption error for {cp_id}: {e}")
+            return None
+
+    # 6. NAUJAS METODAS: Rakto atšaukimas (Key Revocation)
+    def revoke_cp_key(self, cp_id):
+        """Revoke encryption key for CP (security incident)"""
+        with self.lock:
+            if cp_id in self.cp_encryption_keys:
+                del self.cp_encryption_keys[cp_id]
+                print(f"[EV_Central] 🔐 Revoked encryption key for {cp_id}")
+                self.add_log("SECURITY", f"Key revoked for {cp_id}")
+                
+                # Atjungti CP
+                if cp_id in self.entity_to_socket:
+                    try:
+                        self.entity_to_socket[cp_id].close()
+                        del self.entity_to_socket[cp_id]
+                    except:
+                        pass
+                
+                # CP turės iš naujo autentifikuotis
 
     def _handle_charge_request(self, fields, client_socket, client_id):
         """Handle driver charging request"""
@@ -1046,6 +1152,16 @@ class EVCentral:
             except Exception as e:
                 print(f"❌ Command error: {e}")
 
+                if cmd.startswith("revoke"):
+                    parts = cmd.split()
+                    if len(parts) < 2:
+                        print("❌ Usage: revoke <CP_ID>")
+                        continue
+                    
+                    cp_id = parts[1]
+                    self.revoke_cp_key(cp_id)
+                    print(f"✅ Key revoked for {cp_id}. CP must re-authenticate.")
+                    continue
     def shutdown(self):
         """Shutdown the central system"""
         self.running = False

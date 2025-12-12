@@ -211,21 +211,6 @@ services:
     stdin_open: true
     tty: true
 
-  cp_manager:
-    build:
-      context: .
-      dockerfile: Dockerfile.manager
-    image: evcharging-manager
-    container_name: evcharging_cp_manager
-    depends_on:
-      - central
-      - registry
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-    networks:
-      - evcharging_net
-    stdin_open: true
-    tty: true
 
 networks:
   evcharging_net:

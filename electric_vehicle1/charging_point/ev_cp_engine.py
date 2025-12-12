@@ -11,12 +11,14 @@ from datetime import datetime
 from config import CP_BASE_PORT, CP_STATES, COLORS, SUPPLY_UPDATE_INTERVAL
 from shared.protocol import Protocol
 from shared.kafka_client import KafkaClient
-
+import requests
+from shared.encryption import EncryptionManager
 
 class EVCPEngine:
     def __init__(self, cp_id, latitude, longitude, price_per_kwh, 
                  central_host="localhost", central_port=5000,
-                 monitor_host="localhost", monitor_port=None):
+                 monitor_host="localhost", monitor_port=None
+                 username=None, password=None):
         self.cp_id = cp_id
         self.latitude = latitude
         self.longitude = longitude
@@ -37,6 +39,15 @@ class EVCPEngine:
         self.running = True
         self.lock = threading.Lock()
 
+        self.username = username
+        self.password = password
+        self.encryption = EncryptionManager()
+        self.symmetric_key = None  # Gaus iš Central po autentifikavimo
+        
+        # Jei kredencialai nepateikti, gauti iš Registry
+        if not self.username or not self.password:
+            self._fetch_credentials_from_registry()
+
         # Kafka
         self.kafka = KafkaClient(f"EV_CP_E_{cp_id}")
 
@@ -45,6 +56,30 @@ class EVCPEngine:
         self.simulate_fault = False
 
         print(f"[{self.cp_id}] Engine initializing...")
+
+    def _fetch_credentials_from_registry(self):
+        """Fetch credentials from Registry (if CP was pre-registered)"""
+        try:
+            # Tikrinti, ar CP jau registruotas Registry
+            response = requests.get(f"{REGISTRY_URL}/list", timeout=5)
+            if response.status_code == 200:
+                data = response.json()
+                for cp in data.get('charging_points', []):
+                    if cp['cp_id'] == self.cp_id:
+                        self.username = cp['username']
+                        # Slaptažodis turi būti saugomas lokaliai arba paprašyti vartotojo
+                        print(f"[{self.cp_id}] ⚠️  Username: {self.username}")
+                        print(f"[{self.cp_id}] ⚠️  Please provide password:")
+                        self.password = input().strip()
+                        return
+            
+            # Jei nerastas, siūlyti registruotis
+            print(f"[{self.cp_id}] ❌ Not registered in Registry")
+            print(f"[{self.cp_id}] 📝 Please register first via Registry API")
+            sys.exit(1)
+        
+        except Exception as e:
+            print(f"[{self.cp_id}] Registry fetch error: {e}")
 
     def connect_to_central(self):
         """Connect to central system via socket"""
@@ -57,24 +92,72 @@ class EVCPEngine:
                 Protocol.build_message(
                     "REGISTER", "CP", self.cp_id,
                     self.latitude, self.longitude, self.price_per_kwh
+                    self.username,   # Naujas laukas
+                    self.password    # Naujas laukas
                 )
             )
             self.central_socket.send(register_msg)
-            self.send_log("Registered with CENTRAL")
-            print(f"[{self.cp_id}] Registered with CENTRAL")
 
-            # Start listening for messages from CENTRAL
-            thread = threading.Thread(
-                target=self._listen_central,
-                daemon=True
-            )
-            thread.start()
-
-            return True
+            buffer = b''
+            self.central_socket.settimeout(10)
+            
+            try:
+                data = self.central_socket.recv(4096)
+                buffer += data
+                message, is_valid = Protocol.decode(buffer)
+                
+                if is_valid:
+                    fields = Protocol.parse_message(message)
+                    
+                    if fields[0] == MessageTypes.ACKNOWLEDGE:
+                        if fields[2] == "OK":
+                            # Gauti simetrinį raktą
+                            if len(fields) > 3:
+                                key_str = fields[3]
+                                self.symmetric_key = key_str.encode()
+                                print(f"[{self.cp_id}] 🔐 Received encryption key")
+                            
+                            self.send_log("Registered & Authenticated with CENTRAL")
+                            print(f"[{self.cp_id}] ✅ Authenticated with CENTRAL")
+                            
+                            # Start listening for messages from CENTRAL
+                            thread = threading.Thread(
+                                target=self._listen_central,
+                                daemon=True
+                            )
+                            thread.start()
+                            
+                            return True
+                        
+                    elif fields[0] == MessageTypes.DENY:
+                        print(f"[{self.cp_id}] ❌ Authentication DENIED: {fields[2]}")
+                        return False
+            
+            except socket.timeout:
+                print(f"[{self.cp_id}] ❌ Authentication timeout")
+                return False
 
         except Exception as e:
             print(f"[{self.cp_id}] Failed to connect to CENTRAL: {e}")
             return False
+
+    def _encrypt_message(self, message):
+        """Encrypt message using symmetric key"""
+        if not self.symmetric_key:
+            return message  # Jei nėra rakto, siųsti nešifruotą
+        
+        return self.encryption.encrypt(message, self.symmetric_key)
+
+    def _decrypt_message(self, encrypted_message):
+        """Decrypt message using symmetric key"""
+        if not self.symmetric_key:
+            return encrypted_message
+        
+        try:
+            return self.encryption.decrypt(encrypted_message, self.symmetric_key)
+        except Exception as e:
+            print(f"[{self.cp_id}] Decryption error: {e}")
+            return None
 
     def listen_for_monitor(self):
         """Listen for Monitor connections via socket"""
@@ -316,6 +399,20 @@ class EVCPEngine:
 
         return False
 
+    def send_heartbeat(self):
+        """Send encrypted heartbeat"""
+        heartbeat = Protocol.build_message(
+            "HEARTBEAT", self.cp_id, self.state
+        )
+        
+        # NAUJAS: Šifruoti prieš siųsti
+        encrypted = self._encrypt_message(heartbeat)
+        encoded = Protocol.encode(encrypted)
+        
+        try:
+            self.central_socket.send(encoded)
+        except Exception as e:
+            print(f"[{self.cp_id}] ❌ Failed to send heartbeat: {e}")
     def send_status_updates(self):
         """Send status updates to CENTRAL every second"""
         while self.running:
