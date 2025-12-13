@@ -327,6 +327,28 @@ def register_cp():
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
+@app.route('/api/register_driver', methods=['POST'])
+def register_driver():
+    """Forward driver registration to Registry"""
+    data = request.json or {}
+
+    if 'driver_id' not in data:
+        return jsonify({"success": False, "error": "Missing driver_id"}), 400
+
+    try:
+        import requests  # Pridėti import viršuje jei dar nėra
+        
+        registry_url = os.environ.get("REGISTRY_URL", "http://ev_registry:5001")
+        r = requests.post(
+            f"{registry_url}/register_driver",
+            json={"driver_id": data["driver_id"]},
+            timeout=5
+        )
+
+        return jsonify(r.json()), r.status_code
+
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
 
 # --- Server Run ---
 def run_server(host='0.0.0.0', port=8000):

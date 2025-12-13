@@ -33,6 +33,9 @@ services:
       retries: 5
 
   registry:
+    build:
+      context: .
+      dockerfile: Dockerfile.registry
     image: python:3.11-slim
     container_name: evcharging_registry
     working_dir: /app

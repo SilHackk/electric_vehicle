@@ -13,6 +13,7 @@ from shared.protocol import Protocol, MessageTypes
 from shared.kafka_client import KafkaClient
 import requests
 from shared.encryption import EncryptionManager
+from shared.audit_logger import log_charge, log_state
 
 import os
 REGISTRY_URL = os.environ.get("REGISTRY_URL", "http://registry:5001")
@@ -125,6 +126,8 @@ class EVCPEngine:
                                 self.symmetric_key = key_str.encode()
                                 print(f"[{self.cp_id}] 🔐 Received encryption key")
                             
+                            log_state("127.0.0.1", self.cp_id, "DISCONNECTED", "CONNECTED")
+
                             self.send_log("Registered & Authenticated with CENTRAL")
                             print(f"[{self.cp_id}] ✅ Authenticated with CENTRAL")
                             
@@ -138,6 +141,9 @@ class EVCPEngine:
                             return True
                         
                     elif fields[0] == MessageTypes.DENY:
+
+                        log_state("127.0.0.1", self.cp_id, "DISCONNECTED", "DENIED")
+
                         print(f"[{self.cp_id}] ❌ Authentication DENIED: {fields[2]}")
                         return False
             
@@ -283,6 +289,7 @@ class EVCPEngine:
             if self.state == CP_STATES["ACTIVATED"]:
                 self.current_driver = driver_id
                 self.state = CP_STATES["SUPPLYING"]
+                log_charge("127.0.0.1", self.cp_id, driver_id, "CHARGE_START", kwh=kwh_needed)
                 self.charging_complete = False
                 self.current_session = {
                     "driver_id": driver_id,

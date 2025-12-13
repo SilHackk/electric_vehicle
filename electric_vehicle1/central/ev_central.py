@@ -20,6 +20,8 @@ from shared.kafka_client import KafkaClient
 from shared.file_storage import FileStorage
 from flask import Flask, request, jsonify
 from shared.encryption import EncryptionManager
+
+from shared.audit_logger import log_auth, log_charge, log_fault, log_state
 class EVCentral:
     def __init__(self, host=CENTRAL_HOST, port=CENTRAL_PORT):
         self.host = host
@@ -254,9 +256,9 @@ class EVCentral:
         elif msg_type == MessageTypes.END_CHARGE:
             self._handle_end_charge(fields, client_socket, client_id)
         elif msg_type == MessageTypes.FAULT:
-            self._handle_fault(fields, client_socket)
+            self._handle_fault(fields, client_socket, client_id)
         elif msg_type == MessageTypes.RECOVERY:
-            self._handle_recovery(fields, client_socket)
+            self._handle_recovery(fields, client_socket, client_id)
         elif msg_type == "LOG" or msg_type == MessageTypes.LOG if hasattr(MessageTypes, 'LOG') else False:
             # Expected fields: ["LOG", source, text, timestamp?]
             try:
@@ -300,13 +302,15 @@ class EVCentral:
             if not self._verify_cp_credentials(entity_id, username, password):
                 print(f"[EV_Central] ❌ Authentication FAILED for {entity_id}")
                 self.add_log("AUTH-FAIL", f"{entity_id} wrong credentials")
-                
+                log_auth(client_id, entity_id, success=False, reason="INVALID_CREDENTIALS")
                 # Siųsti DENY atsakymą
                 deny_msg = Protocol.encode(
                     Protocol.build_message(MessageTypes.DENY, entity_id, "AUTH_FAILED")
                 )
                 client_socket.send(deny_msg)
                 return  # STOP - nepriimti registracijos
+            
+            log_auth(client_id, entity_id, success=True)
             
             # NAUJAS: Generuoti simetrinį šifravimo raktą
             symmetric_key = self.encryption.generate_key(password)
@@ -530,6 +534,8 @@ class EVCentral:
             self.drivers[driver_id]["status"] = "CHARGING"
             self.drivers[driver_id]["current_cp"] = cp_id
 
+        log_charge(client_id, cp_id, driver_id, "CHARGE_START")
+
         print(f"[EV_Central] ✅ Charge authorized: Driver {driver_id} → CP {cp_id}")
         self.add_log("EV_Central", f"Charge authorized Driver {driver_id} -> {cp_id}")
 
@@ -648,6 +654,8 @@ class EVCentral:
         driver_id = fields[2]
         total_kwh = float(fields[3])
         total_amount = float(fields[4])
+
+        log_charge(client_id, cp_id, driver_id, "CHARGE_END", kwh=total_kwh, amount=total_amount)
 
         duration_seconds = 0
         
@@ -830,7 +838,7 @@ class EVCentral:
                 if self.charging_points[cp_id]["state"] != CP_STATES["SUPPLYING"]:
                     self.charging_points[cp_id]["state"] = state
 
-    def _handle_fault(self, fields, client_socket):
+    def _handle_fault(self, fields, client_socket, client_id):
         """Handle fault notification from CP monitor"""
         if len(fields) < 2:
             return
@@ -866,6 +874,8 @@ class EVCentral:
                         self.drivers[driver_id]["status"] = "IDLE"
                         self.drivers[driver_id]["current_cp"] = None
 
+        log_fault(client_id, cp_id, "CP_FAULT", "Health check failed")
+    
         print(f"[EV_Central] ⚠️ FAULT reported for CP {cp_id}")
         self.add_log("EV_Central", f"FAULT {cp_id}")
         
@@ -892,7 +902,7 @@ class EVCentral:
 
             self.kafka.publish_event("system_events", "CP_FAULT", {"cp_id": cp_id})
 
-    def _handle_recovery(self, fields, client_socket):
+    def _handle_recovery(self, fields, client_socket, client_id):
         """Handle recovery notification from CP monitor"""
         if len(fields) < 2:
             return
@@ -902,6 +912,8 @@ class EVCentral:
         with self.lock:
             if cp_id in self.charging_points:
                 self.charging_points[cp_id]["state"] = CP_STATES["ACTIVATED"]
+        
+        log_fault(client_id, cp_id, "CP_RECOVERY", "System restored")
 
         print(f"[EV_Central] ✅ CP {cp_id} recovered")
         
