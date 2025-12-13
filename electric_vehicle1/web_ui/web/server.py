@@ -310,7 +310,7 @@ def register_cp():
             return jsonify({"success": False, "error": f"Missing {f}"}), 400
 
     try:
-        registry_url = os.environ.get("REGISTRY_URL", "http://ev_registry:5001")
+        registry_url = os.environ.get("REGISTRY_URL", "http://registry:5001")
         r = requests.post(
             f"{registry_url}/register",
             json={
@@ -338,7 +338,7 @@ def register_driver():
     try:
         import requests  # Pridėti import viršuje jei dar nėra
         
-        registry_url = os.environ.get("REGISTRY_URL", "http://ev_registry:5001")
+        registry_url = os.environ.get("REGISTRY_URL", "http://registry:5001")
         r = requests.post(
             f"{registry_url}/register_driver",
             json={"driver_id": data["driver_id"]},
