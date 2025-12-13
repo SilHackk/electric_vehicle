@@ -9,15 +9,19 @@ import sys
 import json
 from datetime import datetime
 from config import CP_BASE_PORT, CP_STATES, COLORS, SUPPLY_UPDATE_INTERVAL
-from shared.protocol import Protocol
+from shared.protocol import Protocol, MessageTypes
 from shared.kafka_client import KafkaClient
 import requests
 from shared.encryption import EncryptionManager
 
+import os
+REGISTRY_URL = os.environ.get("REGISTRY_URL", "http://registry:5001")
+
+
 class EVCPEngine:
     def __init__(self, cp_id, latitude, longitude, price_per_kwh, 
                  central_host="localhost", central_port=5000,
-                 monitor_host="localhost", monitor_port=None
+                 monitor_host="localhost", monitor_port=None,
                  username=None, password=None):
         self.cp_id = cp_id
         self.latitude = latitude
@@ -60,26 +64,30 @@ class EVCPEngine:
     def _fetch_credentials_from_registry(self):
         """Fetch credentials from Registry (if CP was pre-registered)"""
         try:
-            # Tikrinti, ar CP jau registruotas Registry
             response = requests.get(f"{REGISTRY_URL}/list", timeout=5)
-            if response.status_code == 200:
-                data = response.json()
-                for cp in data.get('charging_points', []):
-                    if cp['cp_id'] == self.cp_id:
-                        self.username = cp['username']
-                        # Slaptažodis turi būti saugomas lokaliai arba paprašyti vartotojo
-                        print(f"[{self.cp_id}] ⚠️  Username: {self.username}")
-                        print(f"[{self.cp_id}] ⚠️  Please provide password:")
-                        self.password = input().strip()
-                        return
-            
-            # Jei nerastas, siūlyti registruotis
+            response.raise_for_status()
+
+            data = response.json()
+            for cp in data.get("charging_points", []):
+                if cp.get("cp_id") == self.cp_id:
+                    self.username = cp.get("username")
+                    self.password = cp.get("password")
+
+                    if not self.username or not self.password:
+                        print(f"[{self.cp_id}] ❌ Missing credentials in Registry")
+                        sys.exit(1)
+
+                    print(f"[{self.cp_id}] ✅ Credentials loaded from Registry")
+                    print(f"[{self.cp_id}] 👤 Username: {self.username}")
+                    return
+
             print(f"[{self.cp_id}] ❌ Not registered in Registry")
-            print(f"[{self.cp_id}] 📝 Please register first via Registry API")
+            print(f"[{self.cp_id}] 📝 Please register via Web UI / Registry API")
             sys.exit(1)
-        
+
         except Exception as e:
             print(f"[{self.cp_id}] Registry fetch error: {e}")
+            sys.exit(1)
 
     def connect_to_central(self):
         """Connect to central system via socket"""
@@ -91,7 +99,7 @@ class EVCPEngine:
             register_msg = Protocol.encode(
                 Protocol.build_message(
                     "REGISTER", "CP", self.cp_id,
-                    self.latitude, self.longitude, self.price_per_kwh
+                    self.latitude, self.longitude, self.price_per_kwh,
                     self.username,   # Naujas laukas
                     self.password    # Naujas laukas
                 )
@@ -288,14 +296,14 @@ class EVCPEngine:
                 self.send_log(f"Charging authorized for driver {driver_id}, kWh={kwh_needed}")
                 print(f"[{self.cp_id}] → IN USE - CHARGING\n")
     def send_log(self, text):
-            """Send a LOG message to CENTRAL so UI can receive it."""
-            try:
-                if self.central_socket:
-                    msg = Protocol.build_message("LOG", self.cp_id, str(text))
-                    self.central_socket.send(Protocol.encode(msg))
-            except Exception as e:
-                # keep local print as fallback
-                print(f"[{self.cp_id}] Failed to send log: {e}")
+        """Send a LOG message to CENTRAL so UI can receive it."""
+        try:
+            if self.central_socket:
+                msg = Protocol.build_message("LOG", self.cp_id, str(text))
+                self.central_socket.send(Protocol.encode(msg))
+        except Exception as e:
+            # keep local print as fallback
+            print(f"[{self.cp_id}] Failed to send log: {e}")
 
     def _handle_stop_command(self):
         """Handle STOP command from CENTRAL"""

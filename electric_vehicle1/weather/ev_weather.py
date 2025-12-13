@@ -10,7 +10,7 @@ import os
 from datetime import datetime
 
 # TAVO API KEY (iš pradinio pranešimo)
-WEATHER_API_KEY = "99e654a32d0b0ae64255762e50a81239"
+WEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY")
 
 # Konfigūracija
 WEATHER_UPDATE_INTERVAL = 4  # sekundės tarp tikrinimų

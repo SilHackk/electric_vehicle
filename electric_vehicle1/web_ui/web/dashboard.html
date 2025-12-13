@@ -43,6 +43,7 @@
     </style>
 </head>
 <body>
+
 <div class="container">
     <header>
         <h1>⚡ EVCharging System Dashboard</h1>
@@ -51,6 +52,17 @@
             <div id="last-update" class="status-item">Last Update: —</div>
         </div>
     </header>
+
+    <div class="card">
+        <h2>➕ Register Charging Point</h2>
+        <input id="cp_id" placeholder="CP-003">
+        <input id="lat" placeholder="Latitude">
+        <input id="lon" placeholder="Longitude">
+        <input id="price" placeholder="Price €/kWh">
+        <button onclick="registerCP()">Register</button>
+        <div id="cp-register-result"></div>
+    </div>
+
 
     <div id="error-container"></div>
 
@@ -134,6 +146,25 @@ function logDriver(msg, type='info') {
 logDriver("Driver initializing...", "info");
 setTimeout(()=>logDriver("✓ Connected to CENTRAL (local UI)", "success"), 400);
 setTimeout(()=>logDriver("Ready for commands", "success"), 800);
+
+async function registerCP() {
+    const payload = {
+        cp_id: document.getElementById('cp_id').value,
+        latitude: document.getElementById('lat').value,
+        longitude: document.getElementById('lon').value,
+        price_per_kwh: parseFloat(document.getElementById('price').value)
+    };
+
+    const res = await fetch('/api/register_cp', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify(payload)
+    });
+
+    const data = await res.json();
+    document.getElementById('cp-register-result').innerText =
+        JSON.stringify(data, null, 2);
+}
 
 async function fetchDashboardData() {
     try {

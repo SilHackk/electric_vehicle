@@ -77,6 +77,7 @@ services:
     container_name: evcharging_cp_engine_1
     depends_on:
       - central
+      - kafka
     environment:
       KAFKA_BROKER: kafka:9092
     command: python charging_point/ev_cp_engine.py CP-001 40.5 -3.1 0.30 central 5000
@@ -94,6 +95,7 @@ services:
     image: evcharging-cp
     container_name: evcharging_cp_monitor_1
     depends_on:
+      - central
       - cp_engine_1
     environment:
       KAFKA_BROKER: kafka:9092
@@ -110,10 +112,28 @@ services:
     image: evcharging-driver
     container_name: evcharging_driver_1
     depends_on:
+      - kafka
       - central
     environment:
       KAFKA_BROKER: kafka:9092
     command: sh -c 'sleep 8 && python driver/ev_driver.py DRIVER-001 central 5000'
+    networks:
+      - evcharging_net
+    stdin_open: true
+    tty: true
+
+  driver_2:
+    build:
+      context: .
+      dockerfile: Dockerfile.driver
+    image: evcharging-driver
+    container_name: evcharging_driver_2
+    depends_on:
+      - kafka
+      - central
+    environment:
+      KAFKA_BROKER: kafka:9092
+    command: sh -c 'sleep 8 && python driver/ev_driver.py DRIVER-002 central 5000'
     networks:
       - evcharging_net
     stdin_open: true
@@ -126,6 +146,7 @@ services:
     image: evcharging-driver
     container_name: evcharging_driver_auto
     depends_on:
+      - kafka
       - central
     environment:
       KAFKA_BROKER: kafka:9092
@@ -143,6 +164,7 @@ services:
       container_name: evcharging_cp_engine_2
       depends_on:
         - central
+        - kafka
       environment:
         KAFKA_BROKER: kafka:9092
       command: python charging_point/ev_cp_engine.py CP-002 40.4 -3.2 0.35 central 5000
@@ -160,6 +182,7 @@ services:
     image: evcharging-cp
     container_name: evcharging_cp_monitor_2
     depends_on:
+      - central 
       - cp_engine_2
     environment:
       KAFKA_BROKER: kafka:9092
@@ -169,17 +192,6 @@ services:
     stdin_open: true
     tty: true
     
-  driver_2:
-      build:
-        context: .
-        dockerfile: Dockerfile.driver
-      image: evcharging-driver
-      container_name: evcharging_driver_2
-      depends_on:
-        - central
-      environment:
-        KAFKA_BROKER: kafka:9092
-      command: sh -c 'sleep 10 && python driver/ev_driver.py DRIVER-002 central 5000'
   web_ui:
     build:
       context: .
@@ -200,12 +212,14 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.weather
+    image: evcharging-weather
     container_name: evcharging_weather
     depends_on:
       - central
       - registry
     environment:
-      OPENWEATHER_API_KEY: "${OPENWEATHER_API_KEY:-YOUR_API_KEY}"
+      OPENWEATHER_API_KEY: ${OPENWEATHER_API_KEY}
+      CENTRAL_API_URL: http://central:5003
     networks:
       - evcharging_net
     stdin_open: true

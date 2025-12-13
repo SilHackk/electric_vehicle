@@ -300,6 +300,34 @@ def api_stream():
                 continue
     return Response(event_stream(), mimetype='text/event-stream')
 
+@app.route('/api/register_cp', methods=['POST'])
+def register_cp():
+    data = request.json or {}
+
+    required = ['cp_id', 'latitude', 'longitude', 'price_per_kwh']
+    for f in required:
+        if f not in data:
+            return jsonify({"success": False, "error": f"Missing {f}"}), 400
+
+    try:
+        registry_url = os.environ.get("REGISTRY_URL", "http://ev_registry:5001")
+        r = requests.post(
+            f"{registry_url}/register",
+            json={
+                "cp_id": data["cp_id"],
+                "latitude": data["latitude"],
+                "longitude": data["longitude"],
+                "price_per_kwh": data["price_per_kwh"]
+            },
+            timeout=5
+        )
+
+        return jsonify(r.json()), r.status_code
+
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 # --- Server Run ---
 def run_server(host='0.0.0.0', port=8000):
     logging.info("Starting Web UI server...")
