@@ -68,7 +68,7 @@ def health_check():
 def register_cp():
     """
     Register a new CP
-    Body: {"cp_id": "CP-001", "latitude": "40.5", "longitude": "-3.1", "price_per_kwh": 0.30}
+    Body: {"cp_id": "CP-001", "city": "Vilnius", "price_per_kwh": 0.30}
     Returns: {"username": "...", "password": "...", "cp_id": "..."}
     """
     data = request.get_json()
@@ -77,11 +77,13 @@ def register_cp():
         return jsonify({"error": "cp_id required"}), 400
     
     cp_id = data['cp_id']
-    latitude = data.get('latitude', '0')
-    longitude = data.get('longitude', '0')
+    city = data.get("city")
     price_per_kwh = data.get('price_per_kwh', 0.30)
     
     registry = load_registry()
+    
+     if cp_id in registry:
+        return jsonify({"error": "CP already registered"}), 409
     
     # Generate credentials
     username, password = generate_credentials()
@@ -90,10 +92,9 @@ def register_cp():
     # Store CP data
     registry[cp_id] = {
         "cp_id": cp_id,
+        "city": city,
         "username": username,
         "password_hash": password_hash,
-        "latitude": latitude,
-        "longitude": longitude,
         "price_per_kwh": price_per_kwh,
         "registered_at": datetime.now().isoformat()
     }
@@ -105,6 +106,7 @@ def register_cp():
     # Return credentials (password in plaintext ONCE)
     return jsonify({
         "cp_id": cp_id,
+        "city": city,
         "username": username,
         "password": password,  # Only returned once!
         "message": "Registration successful. Save these credentials!"
@@ -170,10 +172,11 @@ def list_cps():
     for cp_id, cp_data in registry.items():
         cps.append({
             "cp_id": cp_id,
+            "city": cp_data["city"],
             "username": cp_data['username'],
-            "latitude": cp_data['latitude'],
-            "longitude": cp_data['longitude'],
+            "password": cp_data.get('password', ''),  # ← THIS LINE MUST EXIST
             "registered_at": cp_data['registered_at']
+            "price_per_kwh": cp_data["price_per_kwh"]
         })
     
     return jsonify({"charging_points": cps}), 200
@@ -238,7 +241,28 @@ def list_drivers():
                     drivers.append(json.loads(line))
     
     return jsonify({"drivers": drivers}), 200
+def init_default_cps():
+    """Pre-register default CPs on startup"""
+    registry = load_registry()
+    
+    for cp in default_cps:
+        if cp["cp_id"] not in registry:
+            username, password = generate_credentials()
+            registry[cp["cp_id"]] = {
+                "cp_id": cp["cp_id"],
+                "username": username,
+                "password": password,           # ← ADD plaintext for CP to read
+                "password_hash": hash_password(password),
+                "city": cp["city"],
+                "price_per_kwh": cp["price_per_kwh"],
+                "registered_at": datetime.now().isoformat()
+            }
+            print(f"[Registry] ✅ Pre-registered {cp['cp_id']} (user: {username})")
+    
+    save_registry(registry)
 
 if __name__ == "__main__":
+    print("[EV_Registry] Initializing default CPs...")
+    init_default_cps()  # ← Should be HERE
     print("[EV_Registry] Starting on port 5001...")
     app.run(host='0.0.0.0', port=5001, debug=True)

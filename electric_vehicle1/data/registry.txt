@@ -1,0 +1,2 @@
+{"cp_id": "CP-001", "username": "cp_user_5c600659", "password": "PeFltsiGv0bfOqK5pHoABA", "password_hash": "f927612f2990e2b7fbd55c7434398db48f44b0fd238069d5ff06ba7b8462eca0", "latitude": "40.5", "longitude": "-3.1", "price_per_kwh": 0.3, "registered_at": "2025-12-13T21:17:51.805196"}
+{"cp_id": "CP-002", "username": "cp_user_288528d8", "password": "lMCzO6B8227Z3KQBGLAj8Q", "password_hash": "623828ecb69b4fae6534bbb34319b9e2605d459fc4afce40ac589cabbd68ab10", "latitude": "40.4", "longitude": "-3.2", "price_per_kwh": 0.35, "registered_at": "2025-12-13T21:17:51.805286"}

@@ -18,6 +18,7 @@ import logging
 import socket
 import ast
 import sys
+import requests
 
 # path hack to allow import shared.* (as in your repo layout)
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

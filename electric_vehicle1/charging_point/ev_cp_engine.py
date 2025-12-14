@@ -20,14 +20,15 @@ REGISTRY_URL = os.environ.get("REGISTRY_URL", "http://registry:5001")
 
 
 class EVCPEngine:
-    def __init__(self, cp_id, latitude, longitude, price_per_kwh, 
+    def __init__(self, cp_id, city, price_per_kwh, 
                  central_host="localhost", central_port=5000,
                  monitor_host="localhost", monitor_port=None,
                  username=None, password=None):
         self.cp_id = cp_id
-        self.latitude = latitude
-        self.longitude = longitude
+        self.city = city
         self.price_per_kwh = float(price_per_kwh)
+        self.latitude = None
+        self.longitude = None
 
         self.central_host = central_host
         self.central_port = central_port
@@ -91,16 +92,17 @@ class EVCPEngine:
             sys.exit(1)
 
     def connect_to_central(self):
-        """Connect to central system via socket"""
+        print(f"[{self.cp_id}] Attempting to connect to {self.central_host}:{self.central_port}")  # ← ADD THIS
         try:
             self.central_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.central_socket.settimeout(10)  # ← ADD THIS
             self.central_socket.connect((self.central_host, self.central_port))
-
             # Register with CENTRAL
             register_msg = Protocol.encode(
                 Protocol.build_message(
                     "REGISTER", "CP", self.cp_id,
-                    self.latitude, self.longitude, self.price_per_kwh,
+                    self.city, 
+                    self.price_per_kwh,
                     self.username,   # Naujas laukas
                     self.password    # Naujas laukas
                 )
@@ -126,6 +128,11 @@ class EVCPEngine:
                                 self.symmetric_key = key_str.encode()
                                 print(f"[{self.cp_id}] 🔐 Received encryption key")
                             
+                            if len(fields) > 5:
+                                self.latitude = fields[4]
+                                self.longitude = fields[5]
+                                print(f"[{self.cp_id}] 📍 Location set: {self.latitude}, {self.longitude}")
+
                             log_state("127.0.0.1", self.cp_id, "DISCONNECTED", "CONNECTED")
 
                             self.send_log("Registered & Authenticated with CENTRAL")
@@ -153,6 +160,8 @@ class EVCPEngine:
 
         except Exception as e:
             print(f"[{self.cp_id}] Failed to connect to CENTRAL: {e}")
+            import traceback
+            traceback.print_exc()  # ← ADD THIS LINE
             return False
 
     def _encrypt_message(self, message):

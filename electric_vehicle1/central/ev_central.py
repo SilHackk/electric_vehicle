@@ -19,6 +19,7 @@ from shared.protocol import Protocol, MessageTypes
 from shared.kafka_client import KafkaClient
 from shared.file_storage import FileStorage
 from flask import Flask, request, jsonify
+import threading
 from shared.encryption import EncryptionManager
 
 from shared.audit_logger import log_auth, log_charge, log_fault, log_state
@@ -28,7 +29,9 @@ class EVCentral:
         self.port = port
         self.server_socket = None
         self.running = True
-
+        threading.Thread(
+            target=self.start_rest_api,
+            daemon=True)
         # File storage instead of database
         self.storage = FileStorage("data")
 
@@ -65,10 +68,59 @@ class EVCentral:
         stored = self.storage.get_cp_secret(cp_id)
         return stored is not None and stored == secret
 
+    def get_coordinates_from_city(self, city):
+        url = "https://api.openweathermap.org/geo/1.0/direct"
+        params = {
+            "q": city,
+            "limit": 1,
+            "appid": "YOUR_OPENWEATHER_API_KEY"
+        }
+
+        response = requests.get(url, params=params, timeout=5)
+        if response.status_code == 200 and response.json():
+            loc = response.json()[0]
+            return loc["lat"], loc["lon"]
+
+        return None, None
+
     def start_rest_api(self):
         """Start Flask REST API for weather alerts"""
         app = Flask(__name__)
-        
+
+        @app.route('/api/register_cp', methods=['POST'])
+        def register_cp():
+            data = request.json
+            cp_id = data.get("cp_id")
+            city = data.get("city")
+            price = data.get("price_per_kwh", 0.30)
+
+            lat, lon = self.get_coordinates_from_city(city)
+
+            if not lat:
+                return jsonify({"error": "Unknown city"}), 400
+
+            with self.lock:
+                self.charging_points[cp_id] = {
+                    "state": CP_STATES["DISCONNECTED"],
+                    "location": (lat, lon),
+                    "price_per_kwh": price,
+                    "current_driver": None,
+                    "kwh_delivered": 0,
+                    "amount_euro": 0,
+                    "session_start": None,
+                    "charging_complete": False
+                }
+
+            self.storage.save_cp(cp_id, lat, lon, price, CP_STATES["DISCONNECTED"])
+
+            return jsonify({
+                "cp_id": cp_id,
+                "city": city,
+                "latitude": lat,
+                "longitude": lon,
+                "message": "CP registered successfully"
+            }), 201
+
         @app.route('/api/weather_alert', methods=['POST'])
         def weather_alert():
             data = request.json
@@ -318,10 +370,18 @@ class EVCentral:
             
             print(f"[EV_Central] 🔐 Generated encryption key for {entity_id}")
         
-            lat = fields[3] if len(fields) > 3 else "0"
-            lon = fields[4] if len(fields) > 4 else "0"
-            price = float(fields[5]) if len(fields) > 5 else 0.30
+            city = fields[3] if len(fields) > 3 else None
+            price = float(fields[4]) if len(fields) > 4 else 0.30
 
+            lat, lon = self.get_coordinates_from_city(city)
+
+            if not lat or not lon:
+                deny_msg = Protocol.encode(
+                    Protocol.build_message(MessageTypes.DENY, entity_id, "UNKNOWN_CITY")
+                )
+                client_socket.send(deny_msg)
+                return
+            
             with self.lock:
                 self.charging_points[entity_id] = {
                     "state": CP_STATES["ACTIVATED"],
