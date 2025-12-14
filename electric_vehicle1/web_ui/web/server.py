@@ -28,9 +28,6 @@ from web_ui.web.state import UIState
 from web_ui.web.socket_client import CentralUIClient
 from shared.protocol import Protocol, MessageTypes
 
-from geopy.geocoders import Nominatim
-
-geolocator = Nominatim(user_agent="ev_registry")
 
 # Logging
 logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')

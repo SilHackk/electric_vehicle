@@ -1,5 +1,59 @@
 services:
+  driver_1:
+    build:
+      context: .
+      dockerfile: Dockerfile.driver
+    image: evcharging-driver
+    container_name: evcharging_driver_1
+    depends_on:
+      - kafka
+      - central
+    environment:
+      KAFKA_BROKER: 172.17.0.1:9092
+    command: sh -c 'sleep 8 && python driver/ev_driver.py DRIVER-001 172.17.0.1 5000'
+    networks:
+      - evcharging_net
+    stdin_open: true
+    tty: true
+
+  driver_2:
+    build:
+      context: .
+      dockerfile: Dockerfile.driver
+    image: evcharging-driver
+    container_name: evcharging_driver_2
+    depends_on:
+      - kafka
+      - central
+    environment:
+      KAFKA_BROKER: 172.17.0.1:9092
+    command: sh -c 'sleep 8 && python driver/ev_driver.py DRIVER-002 172.17.0.1 5000'
+    networks:
+      - evcharging_net
+    stdin_open: true
+    tty: true
+
+  driver_auto:
+    build:
+      context: .
+      dockerfile: Dockerfile.driver
+    image: evcharging-driver
+    container_name: evcharging_driver_auto
+    depends_on:
+      - kafka
+      - central
+    environment:
+      KAFKA_BROKER: 172.17.0.1:9092
+    command: sh -c 'sleep 10 && python driver/ev_driver_auto.py DRIVER-AUTO 172.17.0.1 5000 data/charging_requests.txt'
+    volumes:
+      - ./data:/app/data
+    networks:
+      - evcharging_net
+
   registry:
+    build:
+      context: .
+      dockerfile: Dockerfile.registry
     image: python:3.11-slim
     container_name: evcharging_registry
     working_dir: /app
@@ -11,44 +65,9 @@ services:
       - "5001:5001"
     networks:
       - evcharging_net
-  driver_1:
-    build:
-      context: .
-      dockerfile: Dockerfile.driver
-    container_name: manual_driver_1
-    environment:
-      KAFKA_BROKER: 172.21.42.11:9092  # <-- HOST PC IP
-    command: python driver/ev_driver.py DRIVER-001 172.21.42.11 5000
-    #                                               ^^^^^^^^^^^^
-    #                                               HOST PC IP
-    network_mode: host
-    stdin_open: true
-    tty: true
 
-  driver_2:
-    build:
-      context: .
-      dockerfile: Dockerfile.driver
-    container_name: manual_driver_2
-    environment:
-      KAFKA_BROKER: 172.21.42.11:9092  # <-- HOST PC IP
-    command: python driver/ev_driver.py DRIVER-002 172.21.42.11 5000
-    #                                               ^^^^^^^^^^^^
-    #                                               HOST PC IP
-    network_mode: host
-    stdin_open: true
-    tty: true
+ 
 
-  driver_auto:
-    build:
-      context: .
-      dockerfile: Dockerfile.driver
-    container_name: auto_driver
-    environment:
-      KAFKA_BROKER: 172.21.42.11:9092  # <-- HOST PC IP
-    command: sh -c 'sleep 5 && python driver/ev_driver_auto.py DRIVER-AUTO 172.21.42.11 5000 data/charging_requests.txt'
-    #                                                                       ^^^^^^^^^^^^
-    #                                                                       HOST PC IP
-    volumes:
-      - ./data:/app/data
-    network_mode: host
+networks:
+  evcharging_net:
+    driver: bridge

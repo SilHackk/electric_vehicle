@@ -372,20 +372,11 @@ class EVCentral:
         
             city = fields[3] if len(fields) > 3 else None
             price = float(fields[4]) if len(fields) > 4 else 0.30
-
-            lat, lon = self.get_coordinates_from_city(city)
-
-            if not lat or not lon:
-                deny_msg = Protocol.encode(
-                    Protocol.build_message(MessageTypes.DENY, entity_id, "UNKNOWN_CITY")
-                )
-                client_socket.send(deny_msg)
-                return
-            
+          
             with self.lock:
                 self.charging_points[entity_id] = {
                     "state": CP_STATES["ACTIVATED"],
-                    "location": (lat, lon),
+                    "city": city,
                     "price_per_kwh": price,
                     "connected_at": datetime.now().isoformat(),
                     "current_driver": None,
@@ -395,7 +386,6 @@ class EVCentral:
                     "charging_complete": False
                 }
                 
-                self.entity_to_socket[entity_id] = client_socket
 
             self.storage.save_cp(entity_id, lat, lon, price, CP_STATES["ACTIVATED"])
             

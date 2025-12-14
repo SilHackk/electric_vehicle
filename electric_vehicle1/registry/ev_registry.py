@@ -66,34 +66,28 @@ def health_check():
 
 @app.route('/register', methods=['POST'])
 def register_cp():
-    """
-    Register a new CP
-    Body: {"cp_id": "CP-001", "city": "Vilnius", "price_per_kwh": 0.30}
-    Returns: {"username": "...", "password": "...", "cp_id": "..."}
-    """
     data = request.get_json()
     
     if not data or 'cp_id' not in data:
         return jsonify({"error": "cp_id required"}), 400
     
     cp_id = data['cp_id']
-    city = data.get("city")
+    city = data.get('city', 'Madrid')
     price_per_kwh = data.get('price_per_kwh', 0.30)
     
     registry = load_registry()
     
-    if cp_id in registry:
+    if cp_id in registry:  # ← BUVO KLAIDA
         return jsonify({"error": "CP already registered"}), 409
     
-    # Generate credentials
     username, password = generate_credentials()
     password_hash = hash_password(password)
     
-    # Store CP data
     registry[cp_id] = {
         "cp_id": cp_id,
         "city": city,
         "username": username,
+        "password": password,
         "password_hash": password_hash,
         "price_per_kwh": price_per_kwh,
         "registered_at": datetime.now().isoformat()
@@ -101,168 +95,50 @@ def register_cp():
     
     save_registry(registry)
     
-    print(f"[Registry] ✅ Registered CP: {cp_id} with username: {username}")
+    print(f"[Registry] ✅ Registered {cp_id} in {city}")
     
-    # Return credentials (password in plaintext ONCE)
     return jsonify({
         "cp_id": cp_id,
         "city": city,
         "username": username,
-        "password": password,  # Only returned once!
-        "message": "Registration successful. Save these credentials!"
+        "password": password
     }), 201
-
-@app.route('/unregister/<cp_id>', methods=['DELETE'])
-def unregister_cp(cp_id):
-    """Delete a CP registration"""
-    registry = load_registry()
-    
-    if cp_id not in registry:
-        return jsonify({"error": "CP not found"}), 404
-    
-    del registry[cp_id]
-    save_registry(registry)
-    
-    print(f"[Registry] ❌ Unregistered CP: {cp_id}")
-    
-    return jsonify({"message": f"CP {cp_id} unregistered"}), 200
-
-@app.route('/verify', methods=['POST'])
-def verify_credentials():
-    """
-    Verify CP credentials (used by Central)
-    Body: {"cp_id": "CP-001", "username": "...", "password": "..."}
-    Returns: {"valid": true/false}
-    """
-    data = request.get_json()
-    
-    if not data or 'cp_id' not in data or 'username' not in data or 'password' not in data:
-        return jsonify({"valid": False, "error": "Missing fields"}), 400
-    
-    cp_id = data['cp_id']
-    username = data['username']
-    password = data['password']
-    
-    registry = load_registry()
-    
-    if cp_id not in registry:
-        log_auth(request.remote_addr, cp_id, success=False, reason="NOT_REGISTERED")
-        return jsonify({"valid": False, "error": "CP not registered"}), 401
-    
-    cp_data = registry[cp_id]
-    
-    if cp_data['username'] != username:
-        log_auth(request.remote_addr, cp_id, success=False, reason="INVALID_USERNAME")
-        return jsonify({"valid": False, "error": "Invalid username"}), 401
-    
-    if cp_data['password_hash'] != hash_password(password):
-        log_auth(request.remote_addr, cp_id, success=False, reason="INVALID_USERNAME")
-        return jsonify({"valid": False, "error": "Invalid password"}), 401
-    
-    log_auth(request.remote_addr, cp_id, success=True)
-
-    return jsonify({"valid": True, "cp_id": cp_id}), 200
 
 @app.route('/list', methods=['GET'])
 def list_cps():
-    """List all registered CPs (without credentials)"""
     registry = load_registry()
-    
     cps = []
     for cp_id, cp_data in registry.items():
         cps.append({
             "cp_id": cp_id,
-            "city": cp_data["city"],
+            "city": cp_data.get("city", "Unknown"),
             "username": cp_data['username'],
-            "password": cp_data.get('password', ''),  # ← THIS LINE MUST EXIST
-            "registered_at": cp_data['registered_at'],
-            "price_per_kwh": cp_data["price_per_kwh"]
+            "password": cp_data.get('password', ''),
+            "price_per_kwh": cp_data.get("price_per_kwh", 0.30),
+            "registered_at": cp_data['registered_at']
         })
-    
     return jsonify({"charging_points": cps}), 200
 
-@app.route('/register_driver', methods=['POST'])
-def register_driver():
-    """
-    Register a new Driver
-    Body: {"driver_id": "DRIVER-001"}
-    Returns: {"driver_id": "...", "message": "..."}
-    """
-    data = request.get_json()
-    
-    if not data or 'driver_id' not in data:
-        return jsonify({"error": "driver_id required"}), 400
-    
-    driver_id = data['driver_id']
-    
-    # Load existing drivers
-    driver_file = "data/registry_drivers.txt"
-    drivers = {}
-    
-    if os.path.exists(driver_file):
-        with open(driver_file, 'r') as f:
-            for line in f:
-                if line.strip():
-                    d = json.loads(line)
-                    drivers[d['driver_id']] = d
-    
-    # Check if already exists
-    if driver_id in drivers:
-        return jsonify({"error": "Driver already registered"}), 409
-    
-    # Save driver
-    drivers[driver_id] = {
-        "driver_id": driver_id,
-        "registered_at": datetime.now().isoformat()
-    }
-    
-    os.makedirs("data", exist_ok=True)
-    with open(driver_file, 'w') as f:
-        for d in drivers.values():
-            f.write(json.dumps(d) + "\n")
-    
-    print(f"[Registry] ✅ Registered Driver: {driver_id}")
-    
-    return jsonify({
-        "driver_id": driver_id,
-        "message": "Driver registered successfully"
-    }), 201
-
-@app.route('/list_drivers', methods=['GET'])
-def list_drivers():
-    """List all registered drivers"""
-    driver_file = "data/registry_drivers.txt"
-    drivers = []
-    
-    if os.path.exists(driver_file):
-        with open(driver_file, 'r') as f:
-            for line in f:
-                if line.strip():
-                    drivers.append(json.loads(line))
-    
-    return jsonify({"drivers": drivers}), 200
 def init_default_cps():
-    """Pre-register default CPs on startup"""
     registry = load_registry()
-    
-    for cp in init_default_cps():  # ← add parentheses to call the function
+    default_cps = [
+        {"cp_id": "CP-001", "city": "Madrid", "price_per_kwh": 0.30},
+        {"cp_id": "CP-002", "city": "Vilnius", "price_per_kwh": 0.35}
+    ]
+    for cp in default_cps:
         if cp["cp_id"] not in registry:
             username, password = generate_credentials()
             registry[cp["cp_id"]] = {
                 "cp_id": cp["cp_id"],
                 "username": username,
-                "password": password,           # ← ADD plaintext for CP to read
+                "password": password,
                 "password_hash": hash_password(password),
                 "city": cp["city"],
                 "price_per_kwh": cp["price_per_kwh"],
                 "registered_at": datetime.now().isoformat()
             }
-            print(f"[Registry] ✅ Pre-registered {cp['cp_id']} (user: {username})")
-
     save_registry(registry)
 
 if __name__ == "__main__":
-    print("[EV_Registry] Initializing default CPs...")
-    init_default_cps()  # ← Should be HERE
-    print("[EV_Registry] Starting on port 5001...")
+    init_default_cps()
     app.run(host='0.0.0.0', port=5001, debug=True)

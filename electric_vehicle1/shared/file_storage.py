@@ -37,25 +37,18 @@ class FileStorage:
     # CHARGING POINTS
     # ========================================================================
 
-    def save_cp(self, cp_id, latitude, longitude, price_per_kwh, state="ACTIVATED"):
-        """Save or update charging point to file"""
+    def save_cp(self, cp_id, city, price_per_kwh, state="ACTIVATED"):
         with self.lock:
-            # Read existing CPs
             cps = self._read_cps()
-            
-            # Update or add new CP
             cps[cp_id] = {
                 "cp_id": cp_id,
-                "latitude": latitude,
-                "longitude": longitude,
+                "city": city,  # ← NE LAT/LON
                 "price_per_kwh": price_per_kwh,
                 "state": state,
                 "registered_at": datetime.now().isoformat()
             }
-            
-            # Write back to file
             self._write_cps(cps)
-
+            
     def get_cp(self, cp_id):
         """Get a specific charging point"""
         with self.lock:
