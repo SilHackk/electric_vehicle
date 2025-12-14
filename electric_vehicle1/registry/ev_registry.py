@@ -82,7 +82,7 @@ def register_cp():
     
     registry = load_registry()
     
-     if cp_id in registry:
+    if cp_id in registry:
         return jsonify({"error": "CP already registered"}), 409
     
     # Generate credentials
@@ -175,7 +175,7 @@ def list_cps():
             "city": cp_data["city"],
             "username": cp_data['username'],
             "password": cp_data.get('password', ''),  # ← THIS LINE MUST EXIST
-            "registered_at": cp_data['registered_at']
+            "registered_at": cp_data['registered_at'],
             "price_per_kwh": cp_data["price_per_kwh"]
         })
     
@@ -245,7 +245,7 @@ def init_default_cps():
     """Pre-register default CPs on startup"""
     registry = load_registry()
     
-    for cp in default_cps:
+    for cp in init_default_cps():  # ← add parentheses to call the function
         if cp["cp_id"] not in registry:
             username, password = generate_credentials()
             registry[cp["cp_id"]] = {
@@ -258,7 +258,7 @@ def init_default_cps():
                 "registered_at": datetime.now().isoformat()
             }
             print(f"[Registry] ✅ Pre-registered {cp['cp_id']} (user: {username})")
-    
+
     save_registry(registry)
 
 if __name__ == "__main__":

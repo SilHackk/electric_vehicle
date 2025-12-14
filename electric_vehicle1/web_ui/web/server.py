@@ -28,6 +28,10 @@ from web_ui.web.state import UIState
 from web_ui.web.socket_client import CentralUIClient
 from shared.protocol import Protocol, MessageTypes
 
+from geopy.geocoders import Nominatim
+
+geolocator = Nominatim(user_agent="ev_registry")
+
 # Logging
 logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
 
@@ -303,12 +307,20 @@ def api_stream():
 
 @app.route('/api/register_cp', methods=['POST'])
 def register_cp():
-    data = request.json or {}
+    data = request.json or request.form.to_dict()
 
-    required = ['cp_id', 'latitude', 'longitude', 'price_per_kwh']
+    required = ['cp_id', 'city', 'price_per_kwh']
     for f in required:
         if f not in data:
             return jsonify({"success": False, "error": f"Missing {f}"}), 400
+
+    # Geokodavimas: miestas -> latitude & longitude
+    location = geolocator.geocode(data["city"])
+    if not location:
+        return jsonify({"success": False, "error": "Could not determine coordinates for city"}), 400
+
+    latitude = location.latitude
+    longitude = location.longitude
 
     try:
         registry_url = os.environ.get("REGISTRY_URL", "http://registry:5001")
@@ -316,8 +328,8 @@ def register_cp():
             f"{registry_url}/register",
             json={
                 "cp_id": data["cp_id"],
-                "latitude": data["latitude"],
-                "longitude": data["longitude"],
+                "latitude": latitude,
+                "longitude": longitude,
                 "price_per_kwh": data["price_per_kwh"]
             },
             timeout=5
@@ -327,7 +339,6 @@ def register_cp():
 
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
-
 @app.route('/api/register_driver', methods=['POST'])
 def register_driver():
     """Forward driver registration to Registry"""
