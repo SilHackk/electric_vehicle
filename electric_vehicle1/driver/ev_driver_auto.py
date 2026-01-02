@@ -355,8 +355,12 @@ class EVDriverAuto:
         print(f"📋 Processing Request {request_num}/{total}")
         print(f"{'='*70}")
         
-        self.send_charge_request(request["cp_id"], request["kwh_needed"])
-        
+        for attempt in range(3):
+            if self.send_charge_request(request["cp_id"], request["kwh_needed"]):
+                break
+            print("⏳ No CP yet, retrying in 2s...")
+            time.sleep(2)
+
         return True
 
     def run(self):

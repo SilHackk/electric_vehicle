@@ -155,8 +155,10 @@ async function registerCP() {
     };
 
     if (!payload.cp_id || !payload.city || isNaN(payload.price_per_kwh)) {
-        document.getElementById('cp-register-result').innerText =
-            "❌ CP ID, City and Price are required!";
+       document.getElementById('cp-register-result').innerText =
+        res.ok
+            ? `✅ CP registered or already exists\nCity: ${payload.city}`
+            : `❌ Error: ${data.error || 'Failed'}`;
         return;
     }
 
@@ -275,10 +277,13 @@ function updateChargingPoints(cps) {
 }
 
 function updateDriverStatus(driver) {
-    const d = driver || {status:'IDLE', current_cp: null};
-    driverStatusText.textContent = d.status || 'IDLE';
+    const d = driver || {};
+    const isCharging = d.current_cp != null;
+
+    driverStatusText.textContent = isCharging ? 'CHARGING' : (d.status || 'IDLE');
     driverCpText.textContent = d.current_cp || 'None';
 }
+
 
 function updateStatistics() {
     fetch(`${API_URL}/api/stats`, {cache: "no-store"})
@@ -314,18 +319,30 @@ async function sendDriverAction(action, cpId = null, kwhNeeded = 10) {
 }
 
 function showRequestModal() {
-    const availableCPs = Object.entries(latestDashboardData.charging_points || {}).filter(([id,c]) => c.state === 'ACTIVATED' || c.state === 'activated' );
-    if (!availableCPs.length) { logDriver('✗ No available charging points', 'warning'); return; }
+    const availableCPs = Object.entries(latestDashboardData.charging_points || {})
+        .filter(([id, cp]) =>
+            cp.state === 'ACTIVATED' &&
+            (cp.current_driver === null || cp.current_driver === undefined)
+        );
+
+    if (!availableCPs.length) {
+        logDriver('✗ No available charging points', 'warning');
+        return;
+    }
+
     const select = document.getElementById('cp-select');
     select.innerHTML = '';
+
     availableCPs.forEach(([id, cp]) => {
-        const opt = document.createElement('option'); 
-        opt.value = id; 
-        opt.textContent = `${id} (${(cp.price_per_kwh||0).toFixed(2)}€/kWh)`;
+        const opt = document.createElement('option');
+        opt.value = id;
+        opt.textContent = `${id} (${(cp.price_per_kwh || 0).toFixed(2)}€/kWh)`;
         select.appendChild(opt);
     });
+
     document.getElementById('requestModal').style.display = 'block';
 }
+
 
 function closeModal(){ 
     document.getElementById('requestModal').style.display = 'none'; 
@@ -352,11 +369,14 @@ function driverViewCPs(){
 }
 
 function driverFinishCharging(){ 
-    const d = latestDashboardData.drivers[DRIVER_ID]||{}; 
-    if(d.status !== 'CHARGING' || !d.current_cp){ 
+    const d = latestDashboardData.drivers[DRIVER_ID] || {};
+
+    if (!d.current_cp) {
         logDriver('✗ Not currently charging','warning'); 
-        return; 
-    } 
+        return;
+    }
+
+    logDriver(`Ending charge at ${d.current_cp}...`, 'info');
     sendDriverAction('finish_charging', d.current_cp); 
 }
 

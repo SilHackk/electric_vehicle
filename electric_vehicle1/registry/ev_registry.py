@@ -74,10 +74,12 @@ def register_cp():
     cp_id = data['cp_id']
     city = data.get('city', 'Madrid')
     price_per_kwh = data.get('price_per_kwh', 0.30)
+    latitude = data.get('latitude', None)  # ✅ Accept coordinates if provided
+    longitude = data.get('longitude', None)
     
     registry = load_registry()
     
-    if cp_id in registry:  # ← BUVO KLAIDA
+    if cp_id in registry:  # ✅ Check if already exists
         return jsonify({"error": "CP already registered"}), 409
     
     username, password = generate_credentials()
@@ -86,6 +88,8 @@ def register_cp():
     registry[cp_id] = {
         "cp_id": cp_id,
         "city": city,
+        "latitude": latitude,  # ✅ Store coordinates
+        "longitude": longitude,
         "username": username,
         "password": password,
         "password_hash": password_hash,
@@ -100,9 +104,68 @@ def register_cp():
     return jsonify({
         "cp_id": cp_id,
         "city": city,
+        "latitude": latitude,
+        "longitude": longitude,
         "username": username,
         "password": password
     }), 201
+
+
+def init_default_cps():
+    """Initialize default CPs with ACTUAL coordinates"""
+    registry = load_registry()
+    default_cps = [
+        {"cp_id": "CP-001", "city": "Madrid", "latitude": 40.4168, "longitude": -3.7038, "price_per_kwh": 0.30},
+        {"cp_id": "CP-002", "city": "Vilnius", "latitude": 54.6872, "longitude": 25.2797, "price_per_kwh": 0.35}
+    ]
+    for cp in default_cps:
+        if cp["cp_id"] not in registry:
+            username, password = generate_credentials()
+            registry[cp["cp_id"]] = {
+                "cp_id": cp["cp_id"],
+                "username": username,
+                "password": password,
+                "password_hash": hash_password(password),
+                "city": cp["city"],
+                "latitude": cp["latitude"],   # ✅ Add coordinates
+                "longitude": cp["longitude"],
+                "price_per_kwh": cp["price_per_kwh"],
+                "registered_at": datetime.now().isoformat()
+            }
+    save_registry(registry)
+    print(f"[Registry] ✅ Initialized {len(default_cps)} default CPs")
+@app.route('/verify', methods=['POST'])
+def verify_cp():
+    data = request.get_json() or {}
+    cp_id = data.get("cp_id")
+    username = data.get("username")
+    password = data.get("password")
+
+    registry = load_registry()
+
+    if cp_id not in registry:
+        log_auth("CP", cp_id, success=False, reason="CP_NOT_FOUND")
+        return jsonify({"valid": False, "error": "CP not found"}), 404
+
+    cp = registry[cp_id]
+
+    if cp.get("username") != username:
+        log_auth("CP", cp_id, success=False, reason="INVALID_USERNAME")
+        return jsonify({"valid": False, "error": "Invalid username"}), 401
+
+    if cp.get("password_hash") != hash_password(password):
+        log_auth("CP", cp_id, success=False, reason="INVALID_PASSWORD")
+        return jsonify({"valid": False, "error": "Invalid password"}), 401
+
+    log_auth("CP", cp_id, success=True)
+
+    return jsonify({
+        "valid": True,
+        "price_per_kwh": cp.get("price_per_kwh", 0.30),
+        "latitude": cp.get("latitude"),
+        "longitude": cp.get("longitude")
+    }), 200
+
 
 @app.route('/list', methods=['GET'])
 def list_cps():
@@ -119,25 +182,6 @@ def list_cps():
         })
     return jsonify({"charging_points": cps}), 200
 
-def init_default_cps():
-    registry = load_registry()
-    default_cps = [
-        {"cp_id": "CP-001", "city": "Madrid", "price_per_kwh": 0.30},
-        {"cp_id": "CP-002", "city": "Vilnius", "price_per_kwh": 0.35}
-    ]
-    for cp in default_cps:
-        if cp["cp_id"] not in registry:
-            username, password = generate_credentials()
-            registry[cp["cp_id"]] = {
-                "cp_id": cp["cp_id"],
-                "username": username,
-                "password": password,
-                "password_hash": hash_password(password),
-                "city": cp["city"],
-                "price_per_kwh": cp["price_per_kwh"],
-                "registered_at": datetime.now().isoformat()
-            }
-    save_registry(registry)
 
 if __name__ == "__main__":
     init_default_cps()

@@ -5,13 +5,10 @@ services:
       dockerfile: Dockerfile.driver
     image: evcharging-driver
     container_name: evcharging_driver_1
-    depends_on:
-      - kafka
-      - central
     environment:
       KAFKA_BROKER: 172.17.0.1:9092
     command: sh -c 'sleep 8 && python driver/ev_driver.py DRIVER-001 172.17.0.1 5000'
-    networks:
+    networks: 
       - evcharging_net
     stdin_open: true
     tty: true
@@ -22,14 +19,10 @@ services:
       dockerfile: Dockerfile.driver
     image: evcharging-driver
     container_name: evcharging_driver_2
-    depends_on:
-      - kafka
-      - central
     environment:
       KAFKA_BROKER: 172.17.0.1:9092
     command: sh -c 'sleep 8 && python driver/ev_driver.py DRIVER-002 172.17.0.1 5000'
-    networks:
-      - evcharging_net
+    networks: host
     stdin_open: true
     tty: true
 
@@ -39,15 +32,12 @@ services:
       dockerfile: Dockerfile.driver
     image: evcharging-driver
     container_name: evcharging_driver_auto
-    depends_on:
-      - kafka
-      - central
     environment:
       KAFKA_BROKER: 172.17.0.1:9092
     command: sh -c 'sleep 10 && python driver/ev_driver_auto.py DRIVER-AUTO 172.17.0.1 5000 data/charging_requests.txt'
     volumes:
       - ./data:/app/data
-    networks:
+    networks: 
       - evcharging_net
 
   registry:
@@ -63,7 +53,7 @@ services:
       - ./data:/app/data
     ports:
       - "5001:5001"
-    networks:
+    networks: 
       - evcharging_net
 
  

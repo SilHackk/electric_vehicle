@@ -5,9 +5,6 @@ services:
       dockerfile: Dockerfile.cp
     image: evcharging-cp
     container_name: evcharging_cp_engine_1
-    depends_on:
-      - central
-      - kafka
     environment:
       KAFKA_BROKER: 172.17.0.1:9092
     command: sh -c 'sleep 10 && python charging_point/ev_cp_engine.py CP-001 40.5 -3.1 0.30 172.17.0.1 5000'
@@ -25,7 +22,6 @@ services:
     image: evcharging-cp
     container_name: evcharging_cp_monitor_1
     depends_on:
-      - central
       - cp_engine_1
     environment:
       KAFKA_BROKER: 172.17.0.1:9092
@@ -41,9 +37,6 @@ services:
       dockerfile: Dockerfile.cp
     image: evcharging-cp
     container_name: evcharging_cp_engine_2
-    depends_on:
-      - central
-      - kafka
     environment:
       KAFKA_BROKER: 172.17.0.1:9092
     command: sh -c 'sleep 10 && python charging_point/ev_cp_engine.py CP-002 40.4 -3.2 0.35 172.17.0.1 5000'
@@ -60,7 +53,6 @@ services:
     image: evcharging-cp
     container_name: evcharging_cp_monitor_2
     depends_on:
-      - central 
       - cp_engine_2
     environment:
       KAFKA_BROKER: 172.17.0.1:9092

@@ -7,6 +7,8 @@ import threading
 import time
 import sys
 import json  
+import os
+import logging
 
 import requests
 from config import REGISTRY_URL, REGISTRY_POLL_INTERVAL
@@ -64,40 +66,109 @@ class EVCentral:
         rest_thread.start()
         print("[EV_Central] REST API started on port 5003")
 
-    def _is_authenticated(self, cp_id, secret):
-        stored = self.storage.get_cp_secret(cp_id)
-        return stored is not None and stored == secret
-
     def get_coordinates_from_city(self, city):
-        url = "https://api.openweathermap.org/geo/1.0/direct"
-        params = {
-            "q": city,
-            "limit": 1,
-            "appid": "YOUR_OPENWEATHER_API_KEY"
+        """
+        Get coordinates from city name using OpenWeatherMap Geocoding API.
+        Weather is OPTIONAL: failure must NOT break registration.
+        """
+        try:
+            api_key = os.getenv("OPENWEATHER_API_KEY")
+
+            if not api_key or api_key == "YOUR_API_KEY":
+                logging.warning("[EV_Central] ⚠️ OpenWeather API key not set")
+                return None, None
+
+            response = requests.get(
+                "https://api.openweathermap.org/geo/1.0/direct",
+                params={
+                    "q": city,
+                    "limit": 1,
+                    "appid": api_key
+                },
+                timeout=5
+            )
+
+            if response.status_code != 200:
+                logging.warning.warning(
+                    f"[EV_Central] ⚠️ Geocoding HTTP {response.status_code} for city: {city}"
+                )
+                return None, None
+
+            data = response.json()
+
+            if not data:
+                logging.warning.warning(
+                    f"[EV_Central] ⚠️ No geocoding results for city: {city}"
+                )
+                return None, None
+
+            location = data[0]
+            return location.get("lat"), location.get("lon")
+
+        except Exception as e:
+            logging.warning.warning(
+                f"[EV_Central] ⚠️ Geocoding exception for city '{city}': {e}"
+            )
+            return None, None
+
+    def register_charging_point(self, cp_id, city, price):
+        """
+        Register new charging point
+        """
+        lat, lon = self.get_coordinates_from_city(city)
+
+        # 🔒 Fallback coordinates (Vilnius)
+        if lat is None or lon is None:
+            print("[EV_Central] ⚠️ Using fallback coordinates for Vilnius")
+            lat, lon = 54.6872, 25.2797
+
+        charging_point = {
+            "id": cp_id,
+            "city": city,
+            "latitude": lat,
+            "longitude": lon,
+            "price": price
         }
 
-        response = requests.get(url, params=params, timeout=5)
-        if response.status_code == 200 and response.json():
-            loc = response.json()[0]
-            return loc["lat"], loc["lon"]
-
-        return None, None
-
+        print(f"[EV_Central] ✅ Charging Point registered: {charging_point}")
+        return charging_point
+    
     def start_rest_api(self):
         """Start Flask REST API for weather alerts"""
         app = Flask(__name__)
 
         @app.route('/api/register_cp', methods=['POST'])
         def register_cp():
-            data = request.json
+            data = request.json or {}
             cp_id = data.get("cp_id")
             city = data.get("city")
-            price = data.get("price_per_kwh", 0.30)
+            price = float(data.get("price_per_kwh", 0.30))
+
+            if not cp_id or not city:
+                return jsonify({"error": "cp_id and city are required"}), 400
 
             lat, lon = self.get_coordinates_from_city(city)
+            if lat is None or lon is None:
+                logging.warning(f"[EV_Central] Geocoding failed for {city}, using fallback")
+                lat, lon = 54.6872, 25.2797  # Vilnius fallback
 
-            if not lat:
-                return jsonify({"error": "Unknown city"}), 400
+            # Try Registry, but DO NOT BLOCK Central
+            try:
+                r = requests.post(
+                    f"{REGISTRY_URL}/register_cp",
+                    json={
+                        "cp_id": cp_id,
+                        "city": city,
+                        "price_per_kwh": price
+                    },
+                    timeout=5
+                )
+
+                if r.status_code >= 400:
+                    logging.warning(f"[EV_Central] Registry error {r.status_code}: {r.text}")
+
+            except Exception as e:
+                logging.warning(f"[EV_Central] Registry unreachable: {e}")
 
             with self.lock:
                 self.charging_points[cp_id] = {
@@ -112,6 +183,8 @@ class EVCentral:
                 }
 
             self.storage.save_cp(cp_id, lat, lon, price, CP_STATES["DISCONNECTED"])
+
+            self.add_log("EV_Central", f"CP {cp_id} registered in {city}")
 
             return jsonify({
                 "cp_id": cp_id,
@@ -275,22 +348,6 @@ class EVCentral:
         fields = Protocol.parse_message(message)
         msg_type = fields[0]
 
-
-        # CP turi prasidėti "CP"
-        if fields[1].startswith("CP"):  
-            cp_id = fields[1]
-
-            # Secret key ateina formato SECRET=xxxx
-            last_field = fields[-1]
-            secret = last_field.replace("SECRET=","") if last_field.startswith("SECRET=") else None
-
-            # Autentifikavimas
-            if not self._is_authenticated(cp_id, secret):
-                print(f"[EV_Central] ❌ Authentication FAILED for {cp_id}")
-                self.add_log("AUTH-FAIL", f"{cp_id} provided wrong secret")
-                return  # STOP – toliau neapdorojama
-
-
         # print(f"[EV_Central] 📨 Received: {msg_type} from {client_id}")
 
         if msg_type == MessageTypes.REGISTER:
@@ -345,75 +402,79 @@ class EVCentral:
 
         entity_type = fields[1]
         entity_id = fields[2]
-
+ 
         if entity_type == "CP":
-            # NAUJAS: Tikrinti kredencialus per Registry API
             username = fields[6] if len(fields) > 6 else None
             password = fields[7] if len(fields) > 7 else None
-            
+
             if not self._verify_cp_credentials(entity_id, username, password):
-                print(f"[EV_Central] ❌ Authentication FAILED for {entity_id}")
-                self.add_log("AUTH-FAIL", f"{entity_id} wrong credentials")
-                log_auth(client_id, entity_id, success=False, reason="INVALID_CREDENTIALS")
-                # Siųsti DENY atsakymą
                 deny_msg = Protocol.encode(
                     Protocol.build_message(MessageTypes.DENY, entity_id, "AUTH_FAILED")
                 )
                 client_socket.send(deny_msg)
-                return  # STOP - nepriimti registracijos
-            
+                return
+
             log_auth(client_id, entity_id, success=True)
-            
-            # NAUJAS: Generuoti simetrinį šifravimo raktą
+
+            # 🔐 Generate encryption key
             symmetric_key = self.encryption.generate_key(password)
             self.cp_encryption_keys[entity_id] = symmetric_key
-            
-            print(f"[EV_Central] 🔐 Generated encryption key for {entity_id}")
-        
-            city = fields[3] if len(fields) > 3 else None
-            price = float(fields[4]) if len(fields) > 4 else 0.30
-          
+            self.entity_to_socket[entity_id] = client_socket
+
+            # 📍 Get CP data
+            stored_cp = self.storage.get_cp(entity_id)
+
+            if stored_cp:
+                lat = stored_cp["latitude"]
+                lon = stored_cp["longitude"]
+                price = stored_cp["price_per_kwh"]
+            else:
+                city = fields[3] if len(fields) > 3 else "Madrid"
+                price = float(fields[4]) if len(fields) > 4 else 0.30
+                lat, lon = self.get_coordinates_from_city(city)
+                if lat is None:
+                    lat, lon = 40.5, -3.1
+
+            # ✅ Update memory state
             with self.lock:
                 self.charging_points[entity_id] = {
                     "state": CP_STATES["ACTIVATED"],
-                    "city": city,
+                    "location": (lat, lon),
                     "price_per_kwh": price,
-                    "connected_at": datetime.now().isoformat(),
                     "current_driver": None,
                     "kwh_delivered": 0,
                     "amount_euro": 0,
                     "session_start": None,
                     "charging_complete": False
                 }
-                
 
             self.storage.save_cp(entity_id, lat, lon, price, CP_STATES["ACTIVATED"])
-            
-            secret = fields[6] if len(fields) > 6 else None
-            self.storage.save_cp_secret(entity_id, secret)
-            
-            print(f"[EV_Central] ✅ CP Registered: {entity_id} at ({lat}, {lon}) - Saved to file")
-            self.add_log("EV_Central", f"CP Registered: {entity_id} at ({lat}, {lon})")
+
+            # 📢 🔥 FIX 1 – BROADCAST CP CONNECT
+            self._broadcast_to_ui(
+                "CP_CONNECTED",
+                entity_id,
+                payload={
+                    "state": "ACTIVATED",
+                    "location": (lat, lon),
+                    "price_per_kwh": price
+                }
+            )
+
+            # 📤 ACK CP
             response = Protocol.encode(
                 Protocol.build_message(
-                    MessageTypes.ACKNOWLEDGE, 
-                    entity_id, 
+                    MessageTypes.ACKNOWLEDGE,
+                    entity_id,
                     "OK",
-                    symmetric_key.decode()  # Grąžinti raktą CP
+                    symmetric_key.decode(),
+                    str(lat),
+                    str(lon)
                 )
             )
             client_socket.send(response)
-            
-            self.kafka.publish_event("system_events", "CP_REGISTERED", {
-                "cp_id": entity_id,
-                "location": (lat, lon),
-                "price": price
-            })
-            
-            response = Protocol.encode(
-                Protocol.build_message(MessageTypes.ACKNOWLEDGE, entity_id, "OK")
-            )
-            client_socket.send(response)
+
+            print(f"[EV_Central] ✅ CP Connected: {entity_id}")
 
         elif entity_type == "DRIVER":
             with self.lock:
@@ -429,7 +490,7 @@ class EVCentral:
             self.storage.save_driver(entity_id, "IDLE")
 
             print(f"[EV_Central] ✅ Driver Registered: {entity_id} - Saved to file")
-            self.add_log(f"[EV_Central] ✅ Driver Registered: {entity_id} - Saved to file")
+            self.add_log("EV_Central", f"Driver {entity_id} registered and saved")
 
             response = Protocol.encode(
                 Protocol.build_message(MessageTypes.ACKNOWLEDGE, entity_id, "OK")
@@ -471,9 +532,8 @@ class EVCentral:
                 client_socket.send(response)
 
     def _verify_cp_credentials(self, cp_id, username, password):
-        """Verify CP credentials via Registry API"""
         try:
-            response = requests.post(
+            r = requests.post(
                 f"{REGISTRY_URL}/verify",
                 json={
                     "cp_id": cp_id,
@@ -482,21 +542,22 @@ class EVCentral:
                 },
                 timeout=5
             )
-            
-            if response.status_code == 200:
-                data = response.json()
-                if data.get("valid"):
-                    # Saugoti kredencialus atminiuje
-                    self.cp_credentials[cp_id] = {
-                        "username": username,
-                        "secret": password  # Bus naudojamas šifravimui
-                    }
-                    return True
-            
-            return False
-        
+
+            if r.status_code != 200:
+                return False
+
+            data = r.json()
+
+            # išsaugom Registry duomenis
+            self.cp_credentials[cp_id] = {
+                "username": username,
+                "secret": password
+            }
+
+            return True
+
         except Exception as e:
-            print(f"[EV_Central] Registry verification error: {e}")
+            print(f"[EV_Central] Registry verify error: {e}")
             return False
 
     # 5. NAUJAS METODAS: Pranešimų šifravimas/dešifravimas
@@ -642,7 +703,7 @@ class EVCentral:
         """Handle real-time supply updates from CP"""
         if len(fields) < 4:
             print(f"[EV_Central] ⚠️  Invalid SUPPLY_UPDATE: {fields}")
-            self.add_log("[EV_Central] ⚠️  Invalid SUPPLY_UPDATE: {fields}")
+            self.add_log("EV_Central", f"Invalid SUPPLY_UPDATE: {fields}")
             return
 
         cp_id = fields[1]
@@ -717,6 +778,11 @@ class EVCentral:
                     duration_seconds = int(time.time() - cp["session_start"])
                 
                 cp["state"] = CP_STATES["ACTIVATED"]
+                self._broadcast_to_ui(
+                    "CP_AVAILABLE",
+                    cp_id,
+                    payload={"state": "ACTIVATED"}
+                )
                 cp["current_driver"] = None
                 cp["kwh_delivered"] = 0
                 cp["amount_euro"] = 0
@@ -810,6 +876,11 @@ class EVCentral:
             total_amount = round(total_kwh * cp["price_per_kwh"], 2)
 
             cp["state"] = CP_STATES["ACTIVATED"]
+            self._broadcast_to_ui(
+                "CP_AVAILABLE",
+                cp_id,
+                payload={"state": "ACTIVATED"}
+            )
             cp["current_driver"] = None
             cp["kwh_delivered"] = 0
             cp["amount_euro"] = 0
@@ -989,7 +1060,7 @@ class EVCentral:
         available_cps = []
         with self.lock:
             for cp_id, cp_data in self.charging_points.items():
-                if cp_data["state"] == CP_STATES["ACTIVATED"] and cp_data["current_driver"] is None:
+                if cp_data["state"] == CP_STATES["ACTIVATED"]:
                     available_cps.append({
                         "cp_id": cp_id,
                         "location": cp_data["location"],

@@ -126,78 +126,25 @@ def index():
 
 @app.route('/api/dashboard')
 def api_dashboard():
-    """
-    Returns the live state snapshot from the Central Service.
-    This endpoint DOES NOT change the state's timestamp. Timestamp must be set by UIState when Central sends updates.
-    As a convenience, if the monitor client is not connected and we have empty state, try a one-shot fetch.
-    """
     snap = monitor_state.snapshot() or {}
-    if not snap.get('timestamp'):
-        snap['timestamp'] = time.time()
 
-    # Check ui_client socket presence
-    try:
-        client_sock = getattr(ui_client, 'sock', None)
-    except Exception:
-        client_sock = None
-
-    need_fallback = (not snap.get('charging_points') or not snap.get('drivers') or snap.get('timestamp') is None)
-    if need_fallback and not client_sock:
-        central_host = os.environ.get('CENTRAL_HOST', 'central')
-        central_port = int(os.environ.get('CENTRAL_PORT', 5000))
+    # If no live data at all – try one-shot fetch
+    if not snap.get("charging_points") and not snap.get("drivers"):
         try:
-            applied = _fetch_full_state_once(central_host, central_port, timeout=2.0)
-            if applied:
-                snap = monitor_state.snapshot()
+            central_host = os.environ.get('CENTRAL_HOST', 'central')
+            central_port = int(os.environ.get('CENTRAL_PORT', 5000))
+            _fetch_full_state_once(central_host, central_port, timeout=2.0)
+            snap = monitor_state.snapshot() or {}
         except Exception:
             pass
 
-    # Drivers fallback from file
-    if not snap.get("drivers"):
-        snap["drivers"] = {}
-        try:
-            drivers_file = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data', 'drivers.txt')
-            if os.path.exists(drivers_file):
-                with open(drivers_file, 'r') as f:
-                    for line in f:
-                        if line.strip():
-                            d = json.loads(line)
-                            snap["drivers"][d["driver_id"]] = {}
-        except Exception:
-            pass
-
-    for driver_id, driver in snap.get("drivers", {}).items():
-        driver.setdefault("status", "IDLE")
-        driver.setdefault("current_cp", None)
-
-    if not snap.get("charging_points"):
-        snap["charging_points"] = {}
-        try:
-            cps_list = _storage.get_all_cps() or []
-            for cp in cps_list:
-                cp_id = cp.get("cp_id")
-                snap["charging_points"][cp_id] = {
-                    "state": "ACTIVATED",
-                    "location": [cp.get("latitude"), cp.get("longitude")],
-                    "price_per_kwh": float(cp.get("price_per_kwh", 0.0)),
-                    "current_driver": None,
-                    "kwh_delivered": 0.0,
-                    "amount_euro": 0.0
-                }
-        except Exception:
-            pass
-
-    for cp in snap.get("charging_points", {}).values():
-        cp.setdefault("current_driver", None)
-        cp.setdefault("kwh_delivered", 0.0)
-        cp.setdefault("amount_euro", 0.0)
-        cp.setdefault("state", "ACTIVATED")
-
-    # IMPORTANT: do NOT overwrite snap['timestamp'] here. The timestamp must reflect real updates from Central.
+    # DO NOT invent or overwrite state here
     if 'timestamp' not in snap:
         snap['timestamp'] = None
 
     return jsonify(snap)
+
+
 
 @app.route('/api/history')
 def api_history():
@@ -209,9 +156,16 @@ def api_stats():
     snap = monitor_state.snapshot()
     cps = snap.get("charging_points", {})
     drivers = snap.get("drivers", {})
-    total_energy = sum(float(c.get("kwh_delivered", 0)) for c in cps.values())
-    total_revenue = sum(float(c.get("amount_euro", 0)) for c in cps.values())
-    active_charges = sum(1 for c in cps.values() if c.get("state") == "SUPPLYING")
+    history = snap.get("history", [])
+
+    total_energy = sum(float(h.get("kwh_delivered", 0)) for h in history)
+    total_revenue = sum(float(h.get("total_amount", 0)) for h in history)
+
+    active_charges = sum(
+        1 for c in cps.values()
+        if c.get("state") == "SUPPLYING"
+    )
+
     return jsonify({
         "total_cps": len(cps),
         "active_charges": active_charges,
@@ -219,6 +173,7 @@ def api_stats():
         "total_energy": total_energy,
         "total_revenue": total_revenue
     })
+
 
 @app.route('/api/monitor_status')
 def api_monitor_status():
@@ -304,38 +259,43 @@ def api_stream():
 
 @app.route('/api/register_cp', methods=['POST'])
 def register_cp():
-    data = request.json or request.form.to_dict()
+    data = request.json or {}
 
-    required = ['cp_id', 'city', 'price_per_kwh']
-    for f in required:
+    for f in ('cp_id', 'city', 'price_per_kwh'):
         if f not in data:
             return jsonify({"success": False, "error": f"Missing {f}"}), 400
 
-    # Geokodavimas: miestas -> latitude & longitude
-    location = geolocator.geocode(data["city"])
-    if not location:
-        return jsonify({"success": False, "error": "Could not determine coordinates for city"}), 400
-
-    latitude = location.latitude
-    longitude = location.longitude
-
     try:
-        registry_url = os.environ.get("REGISTRY_URL", "http://registry:5001")
+        central_host = os.environ.get("CENTRAL_HOST", "central")
         r = requests.post(
-            f"{registry_url}/register",
+            f"http://{central_host}:5003/api/register_cp",
             json={
                 "cp_id": data["cp_id"],
-                "latitude": latitude,
-                "longitude": longitude,
-                "price_per_kwh": data["price_per_kwh"]
+                "city": data["city"],
+                "price_per_kwh": float(data["price_per_kwh"])
             },
             timeout=5
         )
 
-        return jsonify(r.json()), r.status_code
+        if r.status_code in (200, 201):
+            result = r.json()
+            return jsonify({
+                "success": True,
+                "cp_id": result.get("cp_id", data["cp_id"]),
+                "city": result.get("city", data["city"]),
+                "latitude": result.get("latitude"),
+                "longitude": result.get("longitude"),
+                "message": "CP registered or already exists"
+            }), 200
+
+        return jsonify({
+            "success": False,
+            "error": r.json().get("error", "Registration failed")
+        }), r.status_code
 
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
+
 @app.route('/api/register_driver', methods=['POST'])
 def register_driver():
     """Forward driver registration to Registry"""

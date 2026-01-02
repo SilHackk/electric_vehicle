@@ -37,18 +37,73 @@ class FileStorage:
     # CHARGING POINTS
     # ========================================================================
 
-    def save_cp(self, cp_id, city, price_per_kwh, state="ACTIVATED"):
+    def save_cp(self, cp_id, latitude, longitude, price_per_kwh, state="ACTIVATED"):
+        """Save charging point to file (now accepts lat/lon instead of city)"""
         with self.lock:
             cps = self._read_cps()
             cps[cp_id] = {
                 "cp_id": cp_id,
-                "city": city,  # ← NE LAT/LON
-                "price_per_kwh": price_per_kwh,
+                "latitude": float(latitude),   # ✅ Store coordinates
+                "longitude": float(longitude),
+                "price_per_kwh": float(price_per_kwh),
                 "state": state,
                 "registered_at": datetime.now().isoformat()
             }
             self._write_cps(cps)
+
+
+    def save_cp_secret(self, cp_id, secret):
+        """Save CP secret/password for authentication"""
+        secrets_file = os.path.join(self.data_dir, "cp_secrets.txt")
+        
+        with self.lock:
+            secrets = {}
             
+            # Read existing secrets
+            if os.path.exists(secrets_file):
+                try:
+                    with open(secrets_file, 'r') as f:
+                        for line in f:
+                            line = line.strip()
+                            if line:
+                                data = json.loads(line)
+                                secrets[data['cp_id']] = data['secret']
+                except Exception as e:
+                    print(f"[FileStorage] Error reading secrets: {e}")
+            
+            # Update secret
+            secrets[cp_id] = secret
+            
+            # Write back
+            try:
+                with open(secrets_file, 'w') as f:
+                    for cid, sec in secrets.items():
+                        f.write(json.dumps({"cp_id": cid, "secret": sec}) + "\n")
+            except Exception as e:
+                print(f"[FileStorage] Error writing secrets: {e}")
+
+
+    def get_cp_secret(self, cp_id):
+        """Get CP secret for authentication"""
+        secrets_file = os.path.join(self.data_dir, "cp_secrets.txt")
+        
+        if not os.path.exists(secrets_file):
+            return None
+        
+        with self.lock:
+            try:
+                with open(secrets_file, 'r') as f:
+                    for line in f:
+                        line = line.strip()
+                        if line:
+                            data = json.loads(line)
+                            if data['cp_id'] == cp_id:
+                                return data['secret']
+            except Exception as e:
+                print(f"[FileStorage] Error reading secret: {e}")
+        
+        return None
+
     def get_cp(self, cp_id):
         """Get a specific charging point"""
         with self.lock:
