@@ -1,126 +1,131 @@
-The system is designed using a microservices architecture, where independent components communicate via TCP sockets, REST APIs, and Apache Kafka.
-All components are fully dockerized and can be deployed on multiple machines.
+# 🚗⚡ EVCharging – Distributed EV Charging System 
 
-The system supports:
+## 📌 Overview
 
-Real EV charging workflows
+The project simulates a **real-world EV charging infrastructure** using a **microservices architecture**, with secure communication, fault tolerance, and real-time monitoring.
 
-Secure Charging Point (CP) authentication via Registry
+All components are **fully dockerized** and can be deployed on **multiple machines**.
 
-Symmetric encryption for CP–Central communication
+---
 
-Fault detection and recovery
+## 🧩 System Architecture
 
-Real-time monitoring via Web UI
+The system consists of independent services communicating via **TCP sockets**, **REST APIs**, and **Apache Kafka**.
 
-System Architecture
-Core Components
+### Core Components
 
-Registry
+- **Registry**
+  - Charging Point (CP) registration
+  - Credential generation (username + password)
+  - CP verification API (`/verify`)
+  - Registered CP listing (`/list`)
 
-Charging Point registration
+- **Central (EV_Central)**
+  - Core control center
+  - TCP server for CPs, Drivers, and Monitors
+  - Charging authorization
+  - State management
+  - Audit logging
+  - REST API for weather integration
+  - Kafka event publishing
 
-Credential generation (username/password)
+- **Charging Point Engine (CP Engine)**
+  - Connects to Central via TCP
+  - Authenticates using Registry credentials
+  - Uses **symmetric encryption**
+  - Sends HEARTBEAT, SUPPLY_UPDATE, and SUPPLY_END messages
 
-/verify API for CP authentication
+- **Charging Point Monitor**
+  - Performs health checks
+  - Simulates faults
+  - Sends recovery notifications
 
-/list API for registered CPs
+- **Drivers**
+  - Manual driver (CLI)
+  - Automated driver with fault simulation
 
-Central (EV_Central)
+- **Web UI**
+  - Real-time monitoring dashboard
+  - Charging statistics and history
+  - CP registration interface
+  - Live Central state visualization
 
-TCP server for CPs, Drivers, and Monitors
+- **Weather Service**
+  - Uses OpenWeather API
+  - Sends weather alerts to Central
+  - Automatically disables/enables CPs based on conditions
 
-CP state management (DISCONNECTED / ACTIVATED / SUPPLYING / OUT_OF_ORDER)
+- **Kafka**
+  - Event streaming for logs and charging events
 
-Driver authorization
+---
 
-Audit logging and charging history
+## 🔐 Security Features (Release 2)
 
-REST API for weather integration
+- CP authentication via Registry
+- Unique credentials per CP
+- Symmetric encryption for Central ↔ CP communication
+- No hardcoded secrets
+- Audit logs for authentication, charging, and faults
+- Controlled access to Registry APIs
 
-Kafka event publishing
+---
 
-Charging Point Engine (CP Engine)
+## 🔄 Charging Workflow
 
-Connects to Central via TCP
+1. CP registers in the Registry
+2. CP connects to Central and authenticates
+3. Central generates a symmetric encryption key
+4. Driver requests charging
+5. Central authorizes charging
+6. CP sends real-time charging updates
+7. Charging session ends
+8. Ticket is generated and stored
 
-Authenticates using Registry credentials
+---
 
-Uses symmetric encryption
+## ⚠️ Fault Tolerance
 
-Sends HEARTBEAT, SUPPLY_UPDATE, SUPPLY_END messages
+- CP Monitors continuously check CP health
+- Faults immediately stop charging safely
+- CP state changes to `OUT_OF_ORDER`
+- Recovery restores CP automatically
+- Weather-based faults supported
 
-Charging Point Monitor
+---
 
-Health checks
+## 🌦 Weather Integration
 
-Fault simulation
+- Uses OpenWeather API
+- Sends alerts such as:
+  - `ALERT_COLD`
+  - `WEATHER_OK`
+- Central automatically:
+  - Disables unsafe CPs
+  - Restores them when conditions improve
 
-Recovery signaling
+---
 
-Drivers
+## 📊 Monitoring & Web UI
 
-Manual driver (CLI)
+The Web UI provides:
+- Charging Point states
+- Active drivers
+- Ongoing charging sessions
+- Total energy delivered
+- Revenue statistics
+- Charging history
 
-Automated driver with fault simulation
+The UI updates **in real time** based on Central events.
 
-Web UI
+---
 
-Real-time dashboard
+## ⚙️ Deployment
 
-CP, driver, charging, revenue, and history views
+The system is deployed using **Docker Compose**.
 
-CP registration via REST
+### Build and Run
 
-Live Central state visualization
-
-Weather Service
-
-OpenWeather API integration
-
-Weather alerts (ALERT_COLD / WEATHER_OK)
-
-Automatic CP OUT_OF_ORDER / RESTORED handling
-
-🔐 Security (Release 2 Compliance)
-
-✔ CP authentication via Registry
-✔ Encrypted Central ↔ CP communication (symmetric encryption)
-✔ Unique encryption key per CP
-✔ No hardcoded secrets
-✔ Audit logging (authentication, charging, faults)
-✔ Controlled access to Registry APIs
-
-⚙️ Deployment
-
-The system is deployed using Docker Compose:
-
+```bash
 docker compose build
 docker compose up
-
-
-Services include:
-
-Kafka + Zookeeper
-
-Registry
-
-Central
-
-CP Engines (CP-001, CP-002)
-
-CP Monitors
-
-Drivers (manual and automated)
-
-Web UI
-
-Weather Service
-
-Deployment supports:
-
-Single machine (Docker)
-
-Virtual machines
-
-Multiple physical computers in the same network
