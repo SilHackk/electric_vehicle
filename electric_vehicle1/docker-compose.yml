@@ -87,6 +87,7 @@ services:
     environment:
       KAFKA_BROKER: kafka:9092
       REGISTRY_URL: http://registry:5001
+    restart: unless-stopped
     command: sh -c 'sleep 15 && python charging_point/ev_cp_engine.py CP-001 40.5 -3.1 0.30 central 5000'
     ports:
       - "6001:6001"
@@ -106,7 +107,8 @@ services:
       - cp_engine_1
     environment:
       KAFKA_BROKER: kafka:9092
-    command: sh -c 'sleep 20 && python charging_point/ev_cp_monitor.py CP-001 evcharging_cp_engine_1 6001 central 5000'
+    restart: unless-stopped
+    command: sh -c 'sleep 20 && python charging_point/ev_cp_monitor.py CP-001 central 5000'
     networks:
       - evcharging_net
     stdin_open: true
@@ -175,6 +177,7 @@ services:
       environment:
         KAFKA_BROKER: kafka:9092
         REGISTRY_URL: http://registry:5001
+      restart: unless-stopped
       command: sh -c 'sleep 15 && python charging_point/ev_cp_engine.py CP-002 40.4 -3.2 0.35 central 5000'
       ports:
         - "6002:6002"
@@ -194,7 +197,8 @@ services:
       - cp_engine_2
     environment:
       KAFKA_BROKER: kafka:9092
-    command: sh -c 'sleep 20 && python charging_point/ev_cp_monitor.py CP-002 evcharging_cp_engine_2 6002 central 5000'
+    restart: unless-stopped
+    command: sh -c 'sleep 20 && python charging_point/ev_cp_monitor.py CP-002 central 5000'
     networks:
       - evcharging_net
     stdin_open: true

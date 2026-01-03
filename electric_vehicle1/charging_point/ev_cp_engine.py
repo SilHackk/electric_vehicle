@@ -1,38 +1,40 @@
 # ============================================================================
-# EVCharging System - EV_CP_E (Charging Point Engine) - UPDATED DISPLAY
+# EVCharging System - EV_CP_E (Charging Point Engine) - FIXED
+# - No shutdown on temporary disconnect
+# - Automatic reconnect loop
+# - Threads started only once
+# - Incoming messages can be encrypted (decrypt attempt)
+# - Removes undefined self.connected usage
 # ============================================================================
 
 import socket
 import threading
 import time
 import sys
-import json
-from datetime import datetime
-from config import CP_BASE_PORT, CP_STATES, COLORS, SUPPLY_UPDATE_INTERVAL
+import requests
+import os
+
+from config import CP_STATES, SUPPLY_UPDATE_INTERVAL
 from shared.protocol import Protocol, MessageTypes
 from shared.kafka_client import KafkaClient
-import requests
 from shared.encryption import EncryptionManager
 from shared.audit_logger import log_charge, log_state
 
-import os
 REGISTRY_URL = os.environ.get("REGISTRY_URL", "http://registry:5001")
 
 
 class EVCPEngine:
-    def __init__(self, cp_id, latitude, longitude, price_per_kwh, 
+    def __init__(self, cp_id, latitude, longitude, price_per_kwh,
                  central_host="localhost", central_port=5000,
-                 monitor_host="localhost", monitor_port=None,
                  username=None, password=None):
+
         self.cp_id = cp_id
-        self.latitude = float(latitude)  # ✅ Store as float
+        self.latitude = float(latitude)
         self.longitude = float(longitude)
         self.price_per_kwh = float(price_per_kwh)
 
         self.central_host = central_host
         self.central_port = central_port
-        self.monitor_host = monitor_host
-        self.monitor_port = monitor_port or (CP_BASE_PORT + int(cp_id.split('-')[1]))
 
         self.state = CP_STATES["ACTIVATED"]
         self.current_driver = None
@@ -40,552 +42,341 @@ class EVCPEngine:
         self.charging_complete = False
 
         self.central_socket = None
-        self.monitor_socket = None
         self.running = True
+        self.connected = False  # ✅ define it
         self.lock = threading.Lock()
 
         self.username = username
         self.password = password
         self.encryption = EncryptionManager()
         self.symmetric_key = None
-        
-        # If credentials not provided, fetch from Registry
+
         if not self.username or not self.password:
             self._fetch_credentials_from_registry()
 
         self.kafka = KafkaClient(f"EV_CP_E_{cp_id}")
-        self.health_ok = True
-        self.simulate_fault = False
 
-        print(f"[{self.cp_id}] Engine initializing...")
-        print(f"[{self.cp_id}] 📍 Location: ({self.latitude}, {self.longitude})")
-        print(f"[{self.cp_id}] 💰 Price: {self.price_per_kwh}€/kWh")
+        # Thread control (start once)
+        self._threads_started = False
 
+        print(f"[{self.cp_id}] Engine initialized")
+        print(f"[{self.cp_id}] Location: ({self.latitude}, {self.longitude})")
+        print(f"[{self.cp_id}] Price: {self.price_per_kwh} €/kWh")
 
-    def connect_to_central(self):
-        """Connect to CENTRAL and register"""
-        print(f"[{self.cp_id}] Connecting to {self.central_host}:{self.central_port}...")
-        
-        try:
-            self.central_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.central_socket.settimeout(10)
-            self.central_socket.connect((self.central_host, self.central_port))
-            
-            # ✅ Send REGISTER with coordinates (not city)
-            register_msg = Protocol.encode(
-                Protocol.build_message(
-                    "REGISTER", "CP", self.cp_id,
-                    str(self.latitude),   # Field 3: latitude
-                    str(self.longitude),  # Field 4: longitude
-                    str(self.price_per_kwh),  # Field 5: price
-                    self.username,        # Field 6: username
-                    self.password         # Field 7: password
-                )
-            )
-            self.central_socket.send(register_msg)
+    # ---------------------------------------------------------------------
 
-            buffer = b''
-            self.central_socket.settimeout(10)
-            
-            try:
-                data = self.central_socket.recv(4096)
-                buffer += data
-                message, is_valid = Protocol.decode(buffer)
-                
-                if is_valid:
-                    fields = Protocol.parse_message(message)
-                    
-                    if fields[0] == MessageTypes.ACKNOWLEDGE:
-                        if fields[2] == "OK":
-                            # Get encryption key
-                            if len(fields) > 3:
-                                key_str = fields[3]
-                                self.symmetric_key = key_str.encode()
-                                print(f"[{self.cp_id}] 🔐 Received encryption key")
-                            
-                            # Coordinates already set in __init__
-                            print(f"[{self.cp_id}] 📍 Location confirmed: ({self.latitude}, {self.longitude})")
-
-                            log_state("127.0.0.1", self.cp_id, "DISCONNECTED", "CONNECTED")
-                            self.send_log("Registered & Authenticated with CENTRAL")
-                            print(f"[{self.cp_id}] ✅ Authenticated with CENTRAL")
-                            
-                            # Start listening
-                            thread = threading.Thread(
-                                target=self._listen_central,
-                                daemon=True
-                            )
-                            thread.start()
-                            
-                            return True
-                        
-                    elif fields[0] == MessageTypes.DENY:
-                        log_state("127.0.0.1", self.cp_id, "DISCONNECTED", "DENIED")
-                        print(f"[{self.cp_id}] ❌ Authentication DENIED: {fields[2]}")
-                        return False
-            
-            except socket.timeout:
-                print(f"[{self.cp_id}] ❌ Authentication timeout")
-                return False
-
-        except Exception as e:
-            print(f"[{self.cp_id}] Failed to connect to CENTRAL: {e}")
-            import traceback
-            traceback.print_exc()
-            return False
     def _fetch_credentials_from_registry(self):
-        """Fetch credentials from Registry (if CP was pre-registered)"""
-        try:
-            response = requests.get(f"{REGISTRY_URL}/list", timeout=5)
-            response.raise_for_status()
+        r = requests.get(f"{REGISTRY_URL}/list", timeout=5)
+        r.raise_for_status()
+        for cp in r.json().get("charging_points", []):
+            if cp.get("cp_id") == self.cp_id:
+                self.username = cp.get("username")
+                self.password = cp.get("password")
+                print(f"[{self.cp_id}] Credentials loaded from Registry")
+                return
+        print(f"[{self.cp_id}] ❌ Not registered in Registry")
+        sys.exit(1)
 
-            data = response.json()
-            for cp in data.get("charging_points", []):
-                if cp.get("cp_id") == self.cp_id:
-                    self.username = cp.get("username")
-                    self.password = cp.get("password")
+    # ---------------------------------------------------------------------
 
-                    if not self.username or not self.password:
-                        print(f"[{self.cp_id}] ❌ Missing credentials in Registry")
-                        sys.exit(1)
-
-                    print(f"[{self.cp_id}] ✅ Credentials loaded from Registry")
-                    print(f"[{self.cp_id}] 👤 Username: {self.username}")
-                    return
-
-            print(f"[{self.cp_id}] ❌ Not registered in Registry")
-            print(f"[{self.cp_id}] 📝 Please register via Web UI / Registry API")
-            sys.exit(1)
-
-        except Exception as e:
-            print(f"[{self.cp_id}] Registry fetch error: {e}")
-            sys.exit(1)
-
-    def _encrypt_message(self, message):
-        """Encrypt message using symmetric key"""
+    def _encrypt(self, msg):
         if not self.symmetric_key:
-            return message  # Jei nėra rakto, siųsti nešifruotą
-        
-        return self.encryption.encrypt(message, self.symmetric_key)
+            return msg
+        return self.encryption.encrypt(msg, self.symmetric_key)
 
-    def _decrypt_message(self, encrypted_message):
-        """Decrypt message using symmetric key"""
-        if not self.symmetric_key:
-            return encrypted_message
-        
+    def _decrypt_if_needed(self, msg):
+        """
+        Central might send plaintext or encrypted.
+        Try parse first; if parse fails and we have a key, try decrypt then parse.
+        """
         try:
-            return self.encryption.decrypt(encrypted_message, self.symmetric_key)
-        except Exception as e:
-            print(f"[{self.cp_id}] Decryption error: {e}")
+            return Protocol.parse_message(msg)
+        except Exception:
+            pass
+
+        if not self.symmetric_key:
             return None
 
-    def listen_for_monitor(self):
-        """Listen for Monitor connections via socket"""
         try:
-            server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            server_socket.bind(('0.0.0.0', self.monitor_port))
-            server_socket.listen(1)
-
-            print(f"[{self.cp_id}] Listening for monitor on port {self.monitor_port}")
-
-            while self.running:
-                try:
-                    client_socket, addr = server_socket.accept()
-                    self.monitor_socket = client_socket
-                    print(f"[{self.cp_id}] Monitor connected")
-
-                    # Start health check listener
-                    thread = threading.Thread(
-                        target=self._listen_monitor,
-                        daemon=True
-                    )
-                    thread.start()
-
-                except Exception as e:
-                    if self.running:
-                        print(f"[{self.cp_id}] Monitor connection error: {e}")
-
+            dec = self.encryption.decrypt(msg, self.symmetric_key)
+            return Protocol.parse_message(dec)
         except Exception:
-            if self.running:
-                print(f"[{self.cp_id}] Monitor listener error")
+            return None
 
-    def _listen_central(self):
-        """Listen for messages from CENTRAL via socket"""
-        buffer = b''
-        try:
-            while self.running:
-                try:
-                    data = self.central_socket.recv(4096)
-                    if not data:
-                        break
+    # ---------------------------------------------------------------------
 
-                    buffer += data
-
-                    while len(buffer) > 0:
-                        message, is_valid = Protocol.decode(buffer)
-
-                        if is_valid:
-                            etx_pos = buffer.find(b'\x03')
-                            buffer = buffer[etx_pos + 2:]
-
-                            fields = Protocol.parse_message(message)
-                            
-                            if fields[0] == "AUTHORIZE":
-                                self._handle_authorization(fields)
-
-                            elif fields[0] == "STOP_COMMAND":
-                                self._handle_stop_command()
-
-                            elif fields[0] == "RESUME_COMMAND":
-                                self._handle_resume_command()
-
-                            elif fields[0] == "END_SUPPLY":
-                                self._handle_end_supply()
-
-                        else:
-                            break
-
-                except socket.timeout:
-                    continue
-                except Exception as e:
-                    print(f"[{self.cp_id}] CENTRAL listener error: {e}")
-                    break
-
-        except Exception as e:
-            print(f"[{self.cp_id}] CENTRAL connection lost: {e}")
-
-    def _listen_monitor(self):
-        """Listen for health checks from monitor via socket"""
-        try:
-            while self.running and self.monitor_socket:
-                data = self.monitor_socket.recv(4096)
-                if not data:
-                    break
-
-                message, is_valid = Protocol.decode(data)
-                if is_valid:
-                    fields = Protocol.parse_message(message)
-
-                    if fields[0] == "HEALTH_CHECK":
-                        # Respond to health check
-                        if self.simulate_fault:
-                            response = Protocol.encode(
-                                Protocol.build_message(
-                                    "HEALTH_KO", self.cp_id
-                                )
-                            )
-                        else:
-                            response = Protocol.encode(
-                                Protocol.build_message(
-                                    "HEALTH_OK", self.cp_id
-                                )
-                            )
-                        self.monitor_socket.send(response)
-
-        except Exception as e:
-            print(f"[{self.cp_id}] Monitor listener error: {e}")
-
-    def _handle_authorization(self, fields):
-        """Handle charging authorization from CENTRAL"""
-        driver_id = fields[1]
-        kwh_needed = float(fields[3]) if len(fields) > 3 else 10
-
-        with self.lock:
-            if self.state == CP_STATES["ACTIVATED"]:
-                self.current_driver = driver_id
-                self.state = CP_STATES["SUPPLYING"]
-                log_charge("127.0.0.1", self.cp_id, driver_id, "CHARGE_START", kwh=kwh_needed)
-                self.charging_complete = False
-                self.current_session = {
-                    "driver_id": driver_id,
-                    "start_time": time.time(),
-                    "kwh_needed": kwh_needed,
-                    "kwh_delivered": 0.0,
-                    "amount": 0.0
-                }
-
-                print(f"\n[{self.cp_id}] ✅ Charging authorized")
-                self.send_log(f"Charging authorized for driver {driver_id}, kWh={kwh_needed}")
-                print(f"[{self.cp_id}] → IN USE - CHARGING\n")
-    def send_log(self, text):
-        """Send a LOG message to CENTRAL so UI can receive it."""
+    def _close_central_socket(self):
         try:
             if self.central_socket:
-                msg = Protocol.build_message("LOG", self.cp_id, str(text))
-                self.central_socket.send(Protocol.encode(msg))
+                self.central_socket.close()
+        except Exception:
+            pass
+        self.central_socket = None
+        self.connected = False
+
+    # ---------------------------------------------------------------------
+
+    def connect_to_central(self):
+        """
+        One connect attempt.
+        Returns True if connected, False otherwise.
+        """
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(10)
+            s.connect((self.central_host, self.central_port))
+            s.settimeout(None)
+
+            register = Protocol.build_message(
+                MessageTypes.REGISTER, "CP", self.cp_id,
+                str(self.latitude), str(self.longitude),
+                str(self.price_per_kwh),
+                self.username, self.password
+            )
+            s.send(Protocol.encode(register))
+
+            data = s.recv(4096)
+            msg, ok = Protocol.decode(data)
+            if not ok:
+                s.close()
+                return False
+
+            fields = Protocol.parse_message(msg)
+            if fields[0] != MessageTypes.ACKNOWLEDGE or len(fields) < 3 or fields[2] != "OK":
+                s.close()
+                return False
+
+            if len(fields) > 3:
+                self.symmetric_key = fields[3].encode()
+
+            self.central_socket = s
+            self.connected = True
+
+            log_state("CP", self.cp_id, "DISCONNECTED", "CONNECTED")
+            print(f"[{self.cp_id}] ✅ Connected to CENTRAL")
+
+            # Start threads only once
+            if not self._threads_started:
+                self._threads_started = True
+                threading.Thread(target=self._listen_central_loop, daemon=True).start()
+                threading.Thread(target=self._status_loop, daemon=True).start()
+                threading.Thread(target=self._display_loop, daemon=True).start()
+
+            return True
+
         except Exception as e:
-            # keep local print as fallback
-            print(f"[{self.cp_id}] Failed to send log: {e}")
+            print(f"[{self.cp_id}] ❌ Central connection failed: {e}")
+            self._close_central_socket()
+            return False
 
-    def _handle_stop_command(self):
-        """Handle STOP command from CENTRAL"""
-        with self.lock:
-            if self.state == CP_STATES["SUPPLYING"] and self.current_session:
-                driver_id = self.current_driver
-                session = self.current_session
-                kwh_delivered = session["kwh_delivered"]
-                total_amount = round(kwh_delivered * self.price_per_kwh, 2)
-                
-                end_msg = Protocol.encode(
-                    Protocol.build_message(
-                        "SUPPLY_END", self.cp_id, driver_id,
-                        kwh_delivered, total_amount
-                    )
-                )
-                try:
-                    self.central_socket.send(end_msg)
-                except Exception as e:
-                    print(f"[{self.cp_id}] Error notifying supply end: {e}")
-                
-                self.current_driver = None
-                self.current_session = None
-                self.charging_complete = False
-            
-            self.state = CP_STATES["STOPPED"]
-        
-        print(f"[{self.cp_id}] Received STOP command from CENTRAL - now stopped")
+    # ---------------------------------------------------------------------
+    # LISTEN LOOP (never shuts down engine; just marks disconnected)
+    # ---------------------------------------------------------------------
 
-    def _handle_resume_command(self):
-        """Handle RESUME command from CENTRAL"""
+    def _listen_central_loop(self):
+        buffer = b""
+        while self.running:
+            if not self.connected or not self.central_socket:
+                time.sleep(1)
+                continue
+
+            try:
+                data = self.central_socket.recv(4096)
+                if not data:
+                    print(f"[{self.cp_id}] Central closed connection (listen loop)")
+                    self._close_central_socket()
+                    continue
+
+                buffer += data
+
+                while buffer:
+                    msg, ok = Protocol.decode(buffer)
+                    if not ok:
+                        break
+
+                    etx = buffer.find(b"\x03")
+                    buffer = buffer[etx + 2:] if etx != -1 else b""
+
+                    fields = self._decrypt_if_needed(msg)
+                    if not fields:
+                        continue
+
+                    if fields[0] == MessageTypes.AUTHORIZE:
+                        self._handle_authorize(fields)
+
+                    elif fields[0] == MessageTypes.END_SUPPLY:
+                        self._handle_end_supply()
+
+            except (ConnectionResetError, BrokenPipeError, OSError):
+                print(f"[{self.cp_id}] Lost connection to Central (listen loop) - reconnecting...")
+                self._close_central_socket()
+            except Exception as e:
+                # Do not kill engine
+                print(f"[{self.cp_id}] Listen error: {e}")
+                self._close_central_socket()
+
+    # ---------------------------------------------------------------------
+
+    def _handle_authorize(self, fields):
+        # expected: AUTHORIZE, driver_id, cp_id, kwh_needed, ...
+        driver_id = fields[1]
+        kwh_needed = float(fields[3])
+
         with self.lock:
-            self.state = CP_STATES["ACTIVATED"]
+            if self.state != CP_STATES["ACTIVATED"]:
+                return
+
+            self.state = CP_STATES["SUPPLYING"]
+            self.current_driver = driver_id
+            self.current_session = {
+                "start": time.time(),
+                "kwh_needed": kwh_needed,
+                "kwh_delivered": 0.0
+            }
             self.charging_complete = False
-        print(f"[{self.cp_id}] Received RESUME command from CENTRAL - now activated")
+
+        log_charge("CP", self.cp_id, driver_id, "CHARGE_START", kwh=kwh_needed)
+        print(f"[{self.cp_id}] ✅ Charging started for {driver_id}")
+
+    # ---------------------------------------------------------------------
 
     def _handle_end_supply(self):
-        """Handle END_SUPPLY command from CENTRAL"""
         with self.lock:
-            if self.state == CP_STATES["SUPPLYING"] and self.current_session:
-                driver_id = self.current_driver
-                session = self.current_session
+            if not self.current_session:
+                return
 
-                elapsed = time.time() - session["start_time"]
-                total_seconds = 14.0
-                kwh_delivered = min(session["kwh_needed"], (elapsed / total_seconds) * session["kwh_needed"])
-                total_amount = round(kwh_delivered * self.price_per_kwh, 2)
+            elapsed = time.time() - self.current_session["start"]
+            total_kwh = min(
+                self.current_session["kwh_needed"],
+                (elapsed / 14.0) * self.current_session["kwh_needed"]
+            )
+            total_amount = round(total_kwh * self.price_per_kwh, 2)
 
-                print(f"\n[{self.cp_id}] Supply ended by CENTRAL")
-                print(f"[{self.cp_id}] {kwh_delivered:.3f} kWh, {total_amount:.2f}€")
-                self.send_log(f"Supply ended: {kwh_delivered:.3f} kWh, {total_amount:.2f}€")
-                
-                end_msg = Protocol.encode(
-                    Protocol.build_message(
-                        "SUPPLY_END", self.cp_id, driver_id,
-                        kwh_delivered, total_amount
-                    )
-                )
+            msg = Protocol.build_message(
+                MessageTypes.SUPPLY_END,
+                self.cp_id,
+                self.current_driver,
+                f"{total_kwh:.3f}",
+                f"{total_amount:.2f}"
+            )
+
+            # send only if connected
+            if self.central_socket and self.connected:
                 try:
-                    self.central_socket.send(end_msg)
-                except Exception as e:
-                    print(f"[{self.cp_id}] Error notifying supply end: {e}")
+                    self.central_socket.send(Protocol.encode(self._encrypt(msg)))
+                except Exception:
+                    self._close_central_socket()
 
-                self.state = CP_STATES["ACTIVATED"]
-                self.current_driver = None
-                self.current_session = None
-                self.charging_complete = False
-                
-                print(f"[{self.cp_id}] → AVAILABLE\n")
+            self.state = CP_STATES["ACTIVATED"]
+            self.current_driver = None
+            self.current_session = None
+            self.charging_complete = False
 
-    def stop_charging(self):
-        """Simulate driver unplugging vehicle from CP"""
-        with self.lock:
-            if self.state == CP_STATES["SUPPLYING"]:
-                driver_id = self.current_driver
-                session = self.current_session
+        print(f"[{self.cp_id}] ✅ Charging finished")
 
-                elapsed = time.time() - session["start_time"]
-                total_seconds = 14.0
-                kwh_delivered = min(session["kwh_needed"], (elapsed / total_seconds) * session["kwh_needed"])
-                total_amount = round(kwh_delivered * self.price_per_kwh, 2)
+    # ---------------------------------------------------------------------
 
-                print(f"\n[{self.cp_id}] Vehicle unplugged")
-                print(f"[{self.cp_id}] {kwh_delivered:.3f} kWh, {total_amount:.2f}€")
-
-                end_msg = Protocol.encode(
-                    Protocol.build_message(
-                        "SUPPLY_END", self.cp_id, driver_id,
-                        kwh_delivered, total_amount
-                    )
-                )
-                self.central_socket.send(end_msg)
-
-                self.state = CP_STATES["ACTIVATED"]
-                self.current_driver = None
-                self.current_session = None
-                self.charging_complete = False
-
-                print(f"[{self.cp_id}] → AVAILABLE\n")
-                return True
-
-        return False
-
-    def send_heartbeat(self):
-        """Send encrypted heartbeat"""
-        if not self.running:
-            return
-
-        heartbeat = Protocol.build_message(
-            "HEARTBEAT", self.cp_id, self.state
-        )
-
-        encrypted = self._encrypt_message(heartbeat)
-        encoded = Protocol.encode(encrypted)
-
-        try:
-            self.central_socket.send(encoded)
-        except (BrokenPipeError, OSError):
-            print("[CP] Central connection lost, stopping heartbeat")
-            self.running = False
-            try:
-                self.central_socket.close()
-            except:
-                pass
-    def send_status_updates(self):
-        """Send status updates to CENTRAL every second"""
+    def _status_loop(self):
         while self.running:
             time.sleep(SUPPLY_UPDATE_INTERVAL)
 
-            # jei socket jau miręs – išeinam
-            if not self.central_socket:
-                self.running = False
-                return
+            if not self.connected or not self.central_socket:
+                continue
 
             try:
+                hb = Protocol.build_message("HEARTBEAT", self.cp_id, self.state)
+                self.central_socket.send(Protocol.encode(self._encrypt(hb)))
+
                 with self.lock:
-                    # ✅ HEARTBEAT (ENCRYPTED)
-                    try:
-                        heartbeat = Protocol.build_message("HEARTBEAT", self.cp_id, self.state)
-                        encrypted = self._encrypt_message(heartbeat)
-                        self.central_socket.send(Protocol.encode(encrypted))
-                    except (BrokenPipeError, OSError):
-                        print(f"[{self.cp_id}] ❌ Central connection lost, stopping updates")
-                        self.running = False
-                        try:
-                            self.central_socket.close()
-                        except:
-                            pass
-                        self.central_socket = None
-                        return
-
-                    # ✅ SUPPLY_UPDATE (kai CHARGING) – irgi šifruojam
                     if self.state == CP_STATES["SUPPLYING"] and self.current_session:
-                        session = self.current_session
+                        s = self.current_session
+                        s["kwh_delivered"] += s["kwh_needed"] / 14.0
 
-                        kwh_this_second = session["kwh_needed"] / 14.0
-                        session["kwh_delivered"] += kwh_this_second
+                        if s["kwh_delivered"] >= s["kwh_needed"]:
+                            # finalize charge
+                            total_kwh = s["kwh_needed"]
+                            total_amount = round(total_kwh * self.price_per_kwh, 2)
 
-                        if session["kwh_delivered"] >= session["kwh_needed"]:
-                            session["kwh_delivered"] = session["kwh_needed"]
-                            if not self.charging_complete:
-                                self.charging_complete = True
-                                print(f"\n[{self.cp_id}] 🔋 Charged fully, waiting for driver to unplug")
+                            end_msg = Protocol.build_message(
+                                MessageTypes.SUPPLY_END,
+                                self.cp_id,
+                                self.current_driver,
+                                f"{total_kwh:.3f}",
+                                f"{total_amount:.2f}"
+                            )
+                            self.central_socket.send(Protocol.encode(self._encrypt(end_msg)))
+
+                            self.state = CP_STATES["ACTIVATED"]
+                            self.current_driver = None
+                            self.current_session = None
+                            self.charging_complete = False
                             continue
 
-                        amount = session["kwh_delivered"] * self.price_per_kwh
-                        session["amount"] = amount
+                        amount = s["kwh_delivered"] * self.price_per_kwh
+                        upd = Protocol.build_message(
+                            MessageTypes.SUPPLY_UPDATE,
+                            self.cp_id,
+                            f"{s['kwh_delivered']:.3f}",
+                            f"{amount:.2f}"
+                        )
+                        self.central_socket.send(Protocol.encode(self._encrypt(upd)))
 
-                        print(f"[{self.cp_id}] {session['kwh_delivered']:.3f} kWh | {amount:.2f}€ (IN USE - CHARGING)")
-                        self.send_log(f"{session['kwh_delivered']:.3f} kWh | {amount:.2f}€ (CHARGING)")
-
-                        try:
-                            update_plain = Protocol.build_message(
-                                "SUPPLY_UPDATE",
-                                self.cp_id,
-                                f"{kwh_this_second:.6f}",
-                                f"{amount:.2f}"
-                            )
-                            update_enc = self._encrypt_message(update_plain)
-                            self.central_socket.send(Protocol.encode(update_enc))
-                        except (BrokenPipeError, OSError):
-                            print(f"[{self.cp_id}] ❌ Central connection lost during SUPPLY_UPDATE")
-                            self.running = False
-                            try:
-                                self.central_socket.close()
-                            except:
-                                pass
-                            self.central_socket = None
-                            return
-                        except Exception as e:
-                            print(f"[{self.cp_id}] ❌ Failed to send SUPPLY_UPDATE: {e}")
-
+            except (ConnectionResetError, BrokenPipeError, OSError):
+                print(f"[{self.cp_id}] Heartbeat failed - reconnecting...")
+                self._close_central_socket()
             except Exception as e:
-                print(f"[{self.cp_id}] ❌ Error in status update loop: {e}")
-                
-    def status_display_loop(self):
-        """Display status every 2 seconds"""
+                print(f"[{self.cp_id}] Status loop error: {e}")
+                self._close_central_socket()
+
+    # ---------------------------------------------------------------------
+
+    def _display_loop(self):
         while self.running:
             time.sleep(2)
-            
-            with self.lock:
-                if self.state == CP_STATES["ACTIVATED"]:
-                    print(f"[{self.cp_id}] → AVAILABLE")
-                elif self.state == CP_STATES["SUPPLYING"] and self.charging_complete:
-                    print(f"[{self.cp_id}] 🔋 Charged fully, waiting for driver to unplug")
+            if self.state == CP_STATES["ACTIVATED"]:
+                print(f"[{self.cp_id}] AVAILABLE")
+            elif self.state == CP_STATES["SUPPLYING"]:
+                print(f"[{self.cp_id}] SUPPLYING")
 
-    def display_menu(self):
-        """Display interactive menu for CP operations"""
-        while self.running:
-            try:
-                time.sleep(0.5)  # Small delay to allow other threads to print
-                
-                # Just wait, status is displayed by status_display_loop
-                
-            except Exception as e:
-                print(f"Menu error: {e}")
+    # ---------------------------------------------------------------------
+
+    def _shutdown(self, reason):
+        # keep shutdown for manual exit only
+        if not self.running:
+            return
+        print(f"[{self.cp_id}] ❌ Shutdown: {reason}")
+        self.running = False
+        self._close_central_socket()
+        try:
+            self.kafka.close()
+        except Exception:
+            pass
+
+    # ---------------------------------------------------------------------
 
     def run(self):
-        """Run the CP engine"""
-        if not self.connect_to_central():
-            print(f"[{self.cp_id}] Cannot connect to CENTRAL")
-            return
+        """
+        Main loop: keep trying to connect forever.
+        Engine never exits unless container stops.
+        """
+        while self.running:
+            if not self.connected:
+                self.connect_to_central()
+                if not self.connected:
+                    time.sleep(2)
+                    continue
+            time.sleep(1)
 
-        # Start monitor listener
-        monitor_thread = threading.Thread(
-            target=self.listen_for_monitor,
-            daemon=True
-        )
-        monitor_thread.start()
 
-        # Start status updater
-        updater_thread = threading.Thread(
-            target=self.send_status_updates,
-            daemon=True
-        )
-        updater_thread.start()
-
-        # Start status display
-        display_thread = threading.Thread(
-            target=self.status_display_loop,
-            daemon=True
-        )
-        display_thread.start()
-
-        # Run menu
-        try:
-            self.display_menu()
-        except KeyboardInterrupt:
-            print(f"\n[{self.cp_id}] Shutting down...")
-        finally:
-            self.running = False
-            if self.central_socket:
-                self.central_socket.close()
-            if self.monitor_socket:
-                self.monitor_socket.close()
-            self.kafka.close()
-
+# -------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        print("Usage: python ev_cp_engine.py <CP_ID> <latitude> <longitude> <price> [central_host] [central_port]")
-        sys.exit(1)
-
     cp_id = sys.argv[1]
-    latitude = float(sys.argv[2]) if len(sys.argv) > 2 else 40.4168  # Default Madrid
-    longitude = float(sys.argv[3]) if len(sys.argv) > 3 else -3.7038
-    price = float(sys.argv[4]) if len(sys.argv) > 4 else 0.30
-    central_host = sys.argv[5] if len(sys.argv) > 5 else "localhost"
-    central_port = int(sys.argv[6]) if len(sys.argv) > 6 else 5000
+    lat = sys.argv[2]
+    lon = sys.argv[3]
+    price = sys.argv[4]
+    host = sys.argv[5] if len(sys.argv) > 5 else "localhost"
+    port = int(sys.argv[6]) if len(sys.argv) > 6 else 5000
 
-    engine = EVCPEngine(cp_id, latitude, longitude, price, central_host, central_port)
+    engine = EVCPEngine(cp_id, lat, lon, price, host, port)
     engine.run()

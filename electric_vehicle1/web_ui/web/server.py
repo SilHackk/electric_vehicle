@@ -28,7 +28,6 @@ from web_ui.web.state import UIState
 from web_ui.web.socket_client import CentralUIClient
 from shared.protocol import Protocol, MessageTypes
 
-
 # Logging
 logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
 
@@ -53,118 +52,117 @@ def init_monitor():
         ui_client = None
         logging.exception(f"[Web UI] Failed to initialize monitor client: {e}")
 
+def _parse_full_state_fields(fields):
+    cps, drivers, history = [], [], []
+    if len(fields) > 1:
+        try:
+            cps = ast.literal_eval(fields[1])
+        except Exception:
+            cps = []
+    if len(fields) > 2:
+        try:
+            drivers = ast.literal_eval(fields[2])
+        except Exception:
+            drivers = []
+    if len(fields) > 3:
+        try:
+            history = ast.literal_eval(fields[3])
+        except Exception:
+            history = []
+    return cps, drivers, history
+
 def _fetch_full_state_once(host, port, timeout=2.0):
-    """One-shot TCP register -> wait for FULL_STATE and apply it.
-       Returns True if applied, False otherwise."""
+    """One-shot TCP register -> wait for FULL_STATE and apply it."""
+    s = None
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.settimeout(timeout)
         s.connect((host, int(port)))
-        # send REGISTER MONITOR temporary id
+
         reg = Protocol.build_message(MessageTypes.REGISTER, "MONITOR", "WEB_UI_TEMP")
         s.send(Protocol.encode(reg))
 
-        buf = b''
+        buf = b""
         start = time.time()
         while time.time() - start < timeout:
             try:
                 data = s.recv(4096)
             except socket.timeout:
                 continue
+
             if not data:
                 break
+
             buf += data
             msg, valid = Protocol.decode(buf)
             if not valid or msg is None:
                 continue
+
             fields = Protocol.parse_message(msg)
             if not fields:
                 continue
-            if fields[0] == 'FULL_STATE':
-                cps = []
-                drivers = []
-                history = []
-                if len(fields) > 1:
-                    try:
-                        cps = ast.literal_eval(fields[1])
-                    except Exception:
-                        cps = []
-                if len(fields) > 2:
-                    try:
-                        drivers = ast.literal_eval(fields[2])
-                    except Exception:
-                        drivers = []
-                if len(fields) > 3:
-                    try:
-                        history = ast.literal_eval(fields[3])
-                    except Exception:
-                        history = []
-                try:
-                    s.close()
-                except Exception:
-                    pass
+
+            if fields[0] == "FULL_STATE":
+                cps, drivers, history = _parse_full_state_fields(fields)
                 try:
                     monitor_state.set_full_state(cps, drivers, history)
                     return True
                 except Exception:
                     return False
-        try:
-            s.close()
-        except Exception:
-            pass
     except Exception:
         return False
+    finally:
+        try:
+            if s:
+                s.close()
+        except Exception:
+            pass
     return False
 
 # --- Routes ---
-@app.route('/')
+@app.route("/")
 def index():
-    html_path = os.path.join(os.path.dirname(__file__), 'dashboard.html')
+    html_path = os.path.join(os.path.dirname(__file__), "dashboard.html")
     if os.path.exists(html_path):
         return send_file(html_path)
     return "<h1>Dashboard not found</h1>", 404
 
-@app.route('/api/dashboard')
+@app.route("/api/dashboard")
 def api_dashboard():
     snap = monitor_state.snapshot() or {}
 
     # If no live data at all – try one-shot fetch
     if not snap.get("charging_points") and not snap.get("drivers"):
         try:
-            central_host = os.environ.get('CENTRAL_HOST', 'central')
-            central_port = int(os.environ.get('CENTRAL_PORT', 5000))
+            central_host = os.environ.get("CENTRAL_HOST", "central")
+            central_port = int(os.environ.get("CENTRAL_PORT", 5000))
             _fetch_full_state_once(central_host, central_port, timeout=2.0)
             snap = monitor_state.snapshot() or {}
         except Exception:
             pass
 
-    # DO NOT invent or overwrite state here
-    if 'timestamp' not in snap:
-        snap['timestamp'] = None
+    # Do not invent state; only ensure key exists
+    if "timestamp" not in snap:
+        snap["timestamp"] = None
 
     return jsonify(snap)
 
-
-
-@app.route('/api/history')
+@app.route("/api/history")
 def api_history():
-    snap = monitor_state.snapshot()
+    snap = monitor_state.snapshot() or {}
     return jsonify({"history": snap.get("history", [])})
 
-@app.route('/api/stats')
+@app.route("/api/stats")
 def api_stats():
-    snap = monitor_state.snapshot()
-    cps = snap.get("charging_points", {})
-    drivers = snap.get("drivers", {})
-    history = snap.get("history", [])
+    snap = monitor_state.snapshot() or {}
+    cps = snap.get("charging_points", {}) or {}
+    drivers = snap.get("drivers", {}) or {}
+    history = snap.get("history", []) or []
 
-    total_energy = sum(float(h.get("kwh_delivered", 0)) for h in history)
-    total_revenue = sum(float(h.get("total_amount", 0)) for h in history)
+    total_energy = sum(float(h.get("kwh_delivered", 0) or 0) for h in history)
+    total_revenue = sum(float(h.get("total_amount", 0) or 0) for h in history)
 
-    active_charges = sum(
-        1 for c in cps.values()
-        if c.get("state") == "SUPPLYING"
-    )
+    active_charges = sum(1 for c in cps.values() if c.get("state") == "SUPPLYING")
 
     return jsonify({
         "total_cps": len(cps),
@@ -174,71 +172,78 @@ def api_stats():
         "total_revenue": total_revenue
     })
 
-
-@app.route('/api/monitor_status')
+@app.route("/api/monitor_status")
 def api_monitor_status():
     connected = False
     try:
-        connected = bool(ui_client and getattr(ui_client, 'sock', None))
+        connected = bool(ui_client and getattr(ui_client, "sock", None))
     except Exception:
         connected = False
-    snap = monitor_state.snapshot()
+
+    snap = monitor_state.snapshot() or {}
     return jsonify({
         "monitor_connected": connected,
-        "last_update": snap.get('timestamp')
+        "last_update": snap.get("timestamp")
     })
 
-@app.route('/api/driver_action', methods=['POST'])
+@app.route("/api/driver_action", methods=["POST"])
 def driver_action():
     data = request.json or {}
-    driver_id = data.get('driver_id')
-    action = data.get('action')
-    cp_id = data.get('cp_id')
-    kwh_needed = float(data.get('kwh_needed', 10))
+    driver_id = data.get("driver_id")
+    action = data.get("action")
+    cp_id = data.get("cp_id")
+    kwh_needed = float(data.get("kwh_needed", 10))
 
     if not driver_id or not action:
         return jsonify({"success": False, "error": "Missing driver_id or action"}), 400
 
-    if not ui_client or not ui_client.sock:
+    if not ui_client or not getattr(ui_client, "sock", None):
         return jsonify({"success": False, "error": "Not connected to Central"}), 503
 
     try:
-        if action == 'request_charge':
+        if action == "request_charge":
             if not cp_id:
                 return jsonify({"success": False, "error": "Missing cp_id"}), 400
-            ui_client.send_command("REQUEST_CHARGE", driver_id=driver_id, cp_id=cp_id, kwh_needed=kwh_needed)
+            ui_client.send_command(
+                "REQUEST_CHARGE",
+                driver_id=driver_id,
+                cp_id=cp_id,
+                kwh_needed=kwh_needed
+            )
             logging.info(f"[Web UI] Sent REQUEST_CHARGE: {driver_id} -> {cp_id}")
 
-        elif action == 'finish_charging':
-            snap = monitor_state.snapshot()
-            driver = snap.get("drivers", {}).get(driver_id, {})
+        elif action == "finish_charging":
+            snap = monitor_state.snapshot() or {}
+            driver = (snap.get("drivers", {}) or {}).get(driver_id, {}) or {}
             cp_id = cp_id or driver.get("current_cp")
             if not cp_id:
                 return jsonify({"success": False, "error": "No active charging session"}), 400
             ui_client.send_command("FINISH_CHARGE", driver_id=driver_id, cp_id=cp_id)
             logging.info(f"[Web UI] Sent FINISH_CHARGE: {driver_id} -> {cp_id}")
+
         else:
             return jsonify({"success": False, "error": f"Unknown action: {action}"}), 400
 
         return jsonify({"success": True})
+
     except Exception as e:
         logging.exception(f"Error: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
+
 # --- SSE stream endpoint ---
-@app.route('/api/stream')
+@app.route("/api/stream")
 def api_stream():
     """
     SSE endpoint: emits a data line when monitor_state.timestamp changes.
-    Emits a comment keepalive every N seconds so connections survive proxies.
+    Emits a comment keepalive every ~10s so connections survive proxies.
     """
     def event_stream():
         last_ts = None
         keepalive = 0
         while True:
             try:
-                snap = monitor_state.snapshot()
-                ts = snap.get('timestamp')
-                # Emit only when timestamp changed and is not None
+                snap = monitor_state.snapshot() or {}
+                ts = snap.get("timestamp")
                 if ts is not None and ts != last_ts:
                     last_ts = ts
                     yield f"data: {ts}\n\n"
@@ -246,7 +251,6 @@ def api_stream():
                 else:
                     time.sleep(0.5)
                     keepalive += 1
-                    # every ~10s send a comment keepalive (does not trigger fetch)
                     if keepalive >= 20:
                         keepalive = 0
                         yield ": keepalive\n\n"
@@ -255,13 +259,14 @@ def api_stream():
             except Exception:
                 time.sleep(1)
                 continue
-    return Response(event_stream(), mimetype='text/event-stream')
 
-@app.route('/api/register_cp', methods=['POST'])
+    return Response(event_stream(), mimetype="text/event-stream")
+
+@app.route("/api/register_cp", methods=["POST"])
 def register_cp():
     data = request.json or {}
 
-    for f in ('cp_id', 'city', 'price_per_kwh'):
+    for f in ("cp_id", "city", "price_per_kwh"):
         if f not in data:
             return jsonify({"success": False, "error": f"Missing {f}"}), 400
 
@@ -288,39 +293,36 @@ def register_cp():
                 "message": "CP registered or already exists"
             }), 200
 
-        return jsonify({
-            "success": False,
-            "error": r.json().get("error", "Registration failed")
-        }), r.status_code
+        try:
+            err = r.json().get("error", "Registration failed")
+        except Exception:
+            err = "Registration failed"
+        return jsonify({"success": False, "error": err}), r.status_code
 
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
-@app.route('/api/register_driver', methods=['POST'])
+@app.route("/api/register_driver", methods=["POST"])
 def register_driver():
     """Forward driver registration to Registry"""
     data = request.json or {}
 
-    if 'driver_id' not in data:
+    if "driver_id" not in data:
         return jsonify({"success": False, "error": "Missing driver_id"}), 400
 
     try:
-        import requests  # Pridėti import viršuje jei dar nėra
-        
         registry_url = os.environ.get("REGISTRY_URL", "http://registry:5001")
         r = requests.post(
             f"{registry_url}/register_driver",
             json={"driver_id": data["driver_id"]},
             timeout=5
         )
-
         return jsonify(r.json()), r.status_code
-
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
 # --- Server Run ---
-def run_server(host='0.0.0.0', port=8000):
+def run_server(host="0.0.0.0", port=8000):
     logging.info("Starting Web UI server...")
     threading.Thread(target=init_monitor, daemon=True).start()
     app.run(host=host, port=port, debug=False, threaded=True)
