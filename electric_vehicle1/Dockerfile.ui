@@ -1,0 +1,22 @@
+# web_ui/Dockerfile.ui
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy everything
+COPY . /app
+
+# Set environment
+ENV PYTHONPATH=/app
+ENV FLASK_APP=web_ui.web.server
+ENV CENTRAL_HOST=${CENTRAL_HOST:-central}
+ENV CENTRAL_PORT=${CENTRAL_PORT:-5000}
+
+EXPOSE 8000
+
+# Run Flask
+CMD ["python", "web_ui/web/server.py"]

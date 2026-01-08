@@ -1,0 +1,3 @@
+{"driver_id": "DRIVER-001", "status": "IDLE", "total_charges": 3, "total_spent": 11.57, "registered_at": "2026-01-04T19:13:28.505227"}
+{"driver_id": "DRIVER-002", "status": "IDLE", "total_charges": 0, "total_spent": 0.0, "registered_at": "2026-01-04T19:13:28.997497"}
+{"driver_id": "DRIVER-AUTO", "status": "IDLE", "total_charges": 27, "total_spent": 0.0, "registered_at": "2026-01-05T15:59:15.178222"}

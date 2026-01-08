@@ -1,0 +1,2 @@
+{"cp_id": "CP-002", "latitude": 40.4, "longitude": -3.2, "price_per_kwh": 0.35, "state": "ACTIVATED", "registered_at": "2026-01-05T16:58:09.491477"}
+{"cp_id": "CP-001", "latitude": 40.5, "longitude": -3.1, "price_per_kwh": 0.3, "state": "ACTIVATED", "registered_at": "2026-01-05T16:58:04.256738"}

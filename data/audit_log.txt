@@ -1,0 +1,17 @@
+{"timestamp": "2026-01-08T15:20:00.694783", "source_ip": "172.18.0.8:42442", "event_type": "AUTHENTICATION", "action": "AUTH_SUCCESS", "details": {"cp_id": "CP-002", "success": true}}
+{"timestamp": "2026-01-08T15:20:01.062477", "source_ip": "172.18.0.12:41528", "event_type": "AUTHENTICATION", "action": "AUTH_SUCCESS", "details": {"cp_id": "CP-001", "success": true}}
+{"timestamp": "2026-01-08T15:20:09.628653", "source_ip": "172.18.0.11:60168", "event_type": "CHARGING", "action": "CHARGE_START", "details": {"cp_id": "CP-001", "driver_id": "DRIVER-001"}}
+{"timestamp": "2026-01-08T15:20:21.740168", "source_ip": "172.18.0.9:33344", "event_type": "CHARGING", "action": "CHARGE_START", "details": {"cp_id": "CP-002", "driver_id": "DRIVER-AUTO"}}
+{"timestamp": "2026-01-08T15:24:16.307996", "source_ip": "172.18.0.12:53920", "event_type": "AUTHENTICATION", "action": "AUTH_SUCCESS", "details": {"cp_id": "CP-001", "success": true}}
+{"timestamp": "2026-01-08T15:24:16.308690", "source_ip": "172.18.0.11:50928", "event_type": "AUTHENTICATION", "action": "AUTH_SUCCESS", "details": {"cp_id": "CP-002", "success": true}}
+{"timestamp": "2026-01-08T15:24:30.712652", "source_ip": "172.18.0.10:57902", "event_type": "CHARGING", "action": "CHARGE_START", "details": {"cp_id": "CP-001", "driver_id": "DRIVER-001"}}
+{"timestamp": "2026-01-08T15:24:36.757949", "source_ip": "172.18.0.7:50488", "event_type": "CHARGING", "action": "CHARGE_START", "details": {"cp_id": "CP-002", "driver_id": "DRIVER-AUTO"}}
+{"timestamp": "2026-01-08T15:52:18.156315", "source_ip": "172.18.0.8:52444", "event_type": "AUTHENTICATION", "action": "AUTH_SUCCESS", "details": {"cp_id": "CP-002", "success": true}}
+{"timestamp": "2026-01-08T15:52:18.523984", "source_ip": "172.18.0.11:51138", "event_type": "AUTHENTICATION", "action": "AUTH_SUCCESS", "details": {"cp_id": "CP-001", "success": true}}
+{"timestamp": "2026-01-08T15:52:35.189178", "source_ip": "172.18.0.10:40054", "event_type": "CHARGING", "action": "CHARGE_START", "details": {"cp_id": "CP-001", "driver_id": "DRIVER-AUTO"}}
+{"timestamp": "2026-01-08T15:53:08.195028", "source_ip": "172.18.0.10:40054", "event_type": "CHARGING", "action": "CHARGE_START", "details": {"cp_id": "CP-001", "driver_id": "DRIVER-AUTO"}}
+{"timestamp": "2026-01-08T15:53:48.202553", "source_ip": "172.18.0.10:40054", "event_type": "CHARGING", "action": "CHARGE_START", "details": {"cp_id": "CP-001", "driver_id": "DRIVER-AUTO"}}
+{"timestamp": "2026-01-08T15:54:28.208395", "source_ip": "172.18.0.10:40054", "event_type": "CHARGING", "action": "CHARGE_START", "details": {"cp_id": "CP-001", "driver_id": "DRIVER-AUTO"}}
+{"timestamp": "2026-01-08T15:54:31.795550", "source_ip": "172.18.0.12:35682", "event_type": "CHARGING", "action": "CHARGE_START", "details": {"cp_id": "CP-002", "driver_id": "DRIVER-001"}}
+{"timestamp": "2026-01-08T15:55:13.217845", "source_ip": "172.18.0.10:40054", "event_type": "CHARGING", "action": "CHARGE_START", "details": {"cp_id": "CP-001", "driver_id": "DRIVER-AUTO"}}
+{"timestamp": "2026-01-08T15:55:48.224335", "source_ip": "172.18.0.10:40054", "event_type": "CHARGING", "action": "CHARGE_START", "details": {"cp_id": "CP-001", "driver_id": "DRIVER-AUTO"}}

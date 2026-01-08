@@ -1,0 +1,693 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>EVCharging System - Complete Dashboard</title>
+  <style>
+    :root { --brand:#667eea; --accent:#764ba2; }
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:Segoe UI, Tahoma, Arial;background:linear-gradient(135deg,var(--brand),var(--accent));padding:20px;min-height:100vh}
+    .container{max-width:1400px;margin:0 auto}
+    header{background:#fff;border-radius:12px;padding:20px;margin-bottom:18px;box-shadow:0 8px 24px rgba(0,0,0,.12)}
+    h1{color:var(--brand);font-size:1.8rem}
+    h2{color:var(--brand);font-size:1.2rem;margin-bottom:12px}
+    .status-bar{display:flex;gap:12px;margin-top:10px;flex-wrap:wrap}
+    .status-item{background:#f5f5f5;padding:8px 14px;border-radius:8px;font-weight:700}
+    .status-item.online{background:#d4edda;color:#155724}
+    .dashboard{display:grid;grid-template-columns:repeat(3, 1fr);gap:16px;margin-bottom:16px}
+    .card{background:#fff;border-radius:12px;padding:18px;box-shadow:0 8px 24px rgba(0,0,0,.08)}
+    .card.wide{grid-column:span 2}
+    .card.full{grid-column:span 3}
+    .driver-terminal{background:#0f1720;color:#00ff99;padding:12px;border-radius:8px;height:200px;overflow:auto;font-family:monospace;font-size:13px}
+    .driver-log-line{margin:4px 0;line-height:1.3}
+    .driver-log-line.info{color:#00ff99}
+    .driver-log-line.success{color:#66ffff}
+    .driver-log-line.warning{color:#fff176}
+    .driver-log-line.error{color:#ff6b6b}
+
+    .cp-item{background:#f8f9fa;border-left:6px solid #6c757d;padding:12px;border-radius:8px;margin-bottom:12px}
+    .cp-item.activated{border-left-color:#28a745;background:#eaf8ee}
+    .cp-item.supplying{border-left-color:#007bff;background:#e8f1ff}
+    .cp-item.disconnected{border-left-color:#6c757d;background:#f0f0f0}
+    .cp-item.out_of_order{border-left-color:#dc3545;background:#ffe8e8}
+
+    .cp-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+    .cp-id{font-weight:700;font-size:1.1rem}
+    .cp-status{padding:6px 12px;border-radius:20px;font-weight:700;font-size:0.85rem}
+
+    .status-activated{background:#28a745;color:#fff}
+    .status-supplying{background:#007bff;color:#fff}
+    .status-disconnected{background:#6c757d;color:#fff}
+    .status-out_of_order{background:#dc3545;color:#fff}
+
+    .no-data{text-align:center;color:#888;padding:18px}
+    .stat-box{background:linear-gradient(135deg,var(--brand),var(--accent));color:#fff;padding:18px;border-radius:8px;text-align:center}
+    input, select, textarea{width:100%;padding:10px;margin:6px 0;border:1px solid #ddd;border-radius:8px;font-size:14px}
+    .btn{padding:10px 16px;border-radius:8px;border:0;cursor:pointer;font-weight:700;margin:4px;font-size:14px}
+    .btn-primary{background:#667eea;color:#fff}
+    .btn-success{background:#28a745;color:#fff}
+    .btn-warning{background:#ffc107;color:#000}
+    .btn-danger{background:#dc3545;color:#fff}
+    .btn-info{background:#17a2b8;color:#fff}
+    .btn:hover{opacity:0.9}
+    .btn:disabled{opacity:0.5;cursor:not-allowed}
+    .result-box{margin-top:10px;padding:12px;background:#f8f9fa;border-radius:8px;font-size:13px;white-space:pre-wrap;max-height:200px;overflow:auto}
+    .result-box.success{background:#d4edda;color:#155724}
+    .result-box.error{background:#f8d7da;color:#721c24}
+    .tabs{display:flex;gap:8px;margin-bottom:12px;border-bottom:2px solid #eee}
+    .tab{padding:10px 20px;cursor:pointer;border:none;background:none;font-weight:600;color:#666}
+    .tab.active{color:var(--brand);border-bottom:3px solid var(--brand);margin-bottom:-2px}
+    .tab-content{display:none}
+    .tab-content.active{display:block}
+    .weather-item{background:#f8f9fa;padding:10px;border-radius:8px;margin:6px 0;display:flex;justify-content:space-between;align-items:center}
+    .weather-item.cold{background:#ffe8e8;border-left:4px solid #dc3545}
+    .weather-item.ok{background:#eaf8ee;border-left:4px solid #28a745}
+    .registry-list{max-height:300px;overflow:auto}
+    .registry-item{background:#f8f9fa;padding:10px;border-radius:8px;margin:6px 0;font-family:monospace;font-size:12px}
+    .progress-bar-container{background:#eee;border-radius:8px;overflow:hidden;height:24px;margin:8px 0}
+    .progress-bar{background:linear-gradient(90deg,#28a745,#20c997);height:100%;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:12px;transition:width 0.3s}
+  </style>
+</head>
+
+<body>
+  <div class="container">
+    <header>
+      <h1>⚡ EVCharging System - Complete Control Panel</h1>
+      <div class="status-bar">
+        <div id="connection-status" class="status-item">🔴 Disconnected</div>
+        <div id="last-update" class="status-item">Last Update: —</div>
+      </div>
+    </header>
+
+    <!-- Main Dashboard -->
+    <div class="dashboard">
+      <!-- Driver Control -->
+      <div class="card">
+        <h2>🚗 Driver Control (DRIVER-001)</h2>
+        <div id="driver-terminal" class="driver-terminal"></div>
+
+        <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-top:12px">
+          <button class="btn btn-success" onclick="showRequestModal()">🔌 Request Charge</button>
+          <button class="btn btn-info" onclick="driverViewCPs()">🔍 Available CPs</button>
+          <button class="btn btn-warning" onclick="driverFinishCharging()">🔚 Finish Charging</button>
+          <button class="btn btn-primary" onclick="forceRefresh()">🔄 Refresh</button>
+        </div>
+
+        <div style="margin-top:12px;padding:10px;background:#f8f9fa;border-radius:8px">
+          <div style="display:flex;justify-content:space-between;padding:4px 0">
+            <span><strong>Status:</strong></span>
+            <span id="driver-status-text">IDLE</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;padding:4px 0">
+            <span><strong>Charging at:</strong></span>
+            <span id="driver-cp-text">None</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Charging Points -->
+      <div class="card">
+        <h2>🔌 Charging Points</h2>
+        <div id="charging-points">
+          <div class="no-data">Loading...</div>
+        </div>
+      </div>
+
+      <!-- Statistics -->
+      <div class="card">
+        <h2>📊 Statistics</h2>
+        <div style="display:grid;gap:10px">
+          <div class="stat-box">
+            <div style="font-size:1.8rem" id="stat-total-cps">0</div>
+            <div>Total CPs</div>
+          </div>
+          <div class="stat-box">
+            <div style="font-size:1.8rem" id="stat-active-charges">0</div>
+            <div>Active Charges</div>
+          </div>
+          <div class="stat-box">
+            <div style="font-size:1.8rem" id="stat-total-energy">0.00</div>
+            <div>Total kWh</div>
+          </div>
+          <div class="stat-box">
+            <div style="font-size:1.8rem" id="stat-total-revenue">€0.00</div>
+            <div>Total Revenue</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Admin Panel -->
+    <div class="card full">
+      <div class="tabs">
+        <button class="tab active" onclick="switchTab(event,'cp-register')">➕ Register CP</button>
+        <button class="tab" onclick="switchTab(event,'registry-view')">📋 View Registry</button>
+        <button class="tab" onclick="switchTab(event,'weather-control')">🌡️ Weather Control</button>
+        <button class="tab" onclick="switchTab(event,'history-view')">📜 Charging History</button>
+      </div>
+
+      <!-- CP Registration Tab -->
+      <div id="cp-register" class="tab-content active">
+        <h2>➕ Register New Charging Point</h2>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px">
+          <div>
+            <label><strong>CP ID:</strong></label>
+            <input id="reg_cp_id" placeholder="CP-003" value="CP-003">
+          </div>
+          <div>
+            <label><strong>City:</strong></label>
+            <input id="reg_city" placeholder="Valencia" value="Valencia">
+          </div>
+          <div>
+            <label><strong>Price (€/kWh):</strong></label>
+            <input id="reg_price" type="number" step="0.01" placeholder="0.30" value="0.30">
+          </div>
+        </div>
+        <button onclick="registerNewCP()" class="btn btn-success" style="width:100%;margin-top:12px;font-size:16px">
+          ✅ Register Charging Point
+        </button>
+        <div id="reg-result" class="result-box" style="display:none"></div>
+      </div>
+
+      <!-- Registry View Tab -->
+      <div id="registry-view" class="tab-content">
+        <h2>📋 Registry Database</h2>
+        <button onclick="loadRegistry()" class="btn btn-primary">🔄 Refresh Registry</button>
+        <div id="registry-list" class="registry-list"></div>
+      </div>
+
+      <!-- Weather Control Tab -->
+      <div id="weather-control" class="tab-content">
+        <h2>🌡️ Weather Control & Monitoring</h2>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+          <div>
+            <h3 style="margin-bottom:8px">📍 Current Weather Status</h3>
+            <button onclick="refreshWeather()" class="btn btn-info" style="width:100%">🔄 Refresh Weather</button>
+            <div id="weather-status" style="margin-top:12px"></div>
+          </div>
+
+          <div>
+            <h3 style="margin-bottom:8px">🧪 Simulate Weather Alert</h3>
+            <select id="weather_cp_id" style="width:100%">
+              <option value="">Select CP...</option>
+              <option value="CP-001">CP-001</option>
+              <option value="CP-002">CP-002</option>
+              <option value="CP-003">CP-003</option>
+            </select>
+            <input id="weather_temp" type="number" placeholder="Temperature (°C)" value="-5" style="width:100%">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px">
+              <button onclick="sendWeatherAlert('ALERT_COLD')" class="btn btn-danger">❄️ Send COLD Alert</button>
+              <button onclick="sendWeatherAlert('WEATHER_OK')" class="btn btn-success">☀️ Send OK Alert</button>
+            </div>
+            <div id="weather-result" class="result-box" style="display:none;margin-top:8px"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- History Tab -->
+      <div id="history-view" class="tab-content">
+        <h2>📜 Recent Charging Sessions</h2>
+        <button onclick="loadHistory()" class="btn btn-primary">🔄 Refresh History</button>
+        <div id="history-list" style="margin-top:12px"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const API_URL = window.location.origin;
+    const POLLING_INTERVAL = 500; // 0.5 seconds
+    const DRIVER_ID = "DRIVER-001";
+
+    let latestDashboardData = { charging_points: {}, drivers: {} };
+    let lastTimestamp = null;
+
+    // Elements
+    const driverTerminal = document.getElementById('driver-terminal');
+    const driverStatusText = document.getElementById('driver-status-text');
+    const driverCpText = document.getElementById('driver-cp-text');
+
+    // ============================================================================
+    // Driver Terminal Logging
+    // ============================================================================
+    function logDriver(msg, type='info') {
+      const line = document.createElement('div');
+      line.className = `driver-log-line ${type}`;
+      line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+      driverTerminal.appendChild(line);
+      driverTerminal.scrollTop = driverTerminal.scrollHeight;
+
+      // Keep only last 50 lines
+      while (driverTerminal.children.length > 50) {
+        driverTerminal.removeChild(driverTerminal.firstChild);
+      }
+    }
+
+    logDriver("🚗 Driver system initializing...", "info");
+    setTimeout(() => logDriver("✅ Connected to Central", "success"), 400);
+    setTimeout(() => logDriver("⚡ Ready for commands", "success"), 800);
+
+    // ============================================================================
+    // Tab Switching
+    // ============================================================================
+    function switchTab(evt, tabId) {
+      document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+
+      document.getElementById(tabId).classList.add('active');
+      if (evt && evt.target) evt.target.classList.add('active');
+
+      if (tabId === 'registry-view') loadRegistry();
+      if (tabId === 'weather-control') refreshWeather();
+      if (tabId === 'history-view') loadHistory();
+    }
+
+    // ============================================================================
+    // Dashboard Data Fetching
+    // ============================================================================
+    async function fetchDashboardData() {
+      try {
+        const res = await fetch(`${API_URL}/api/dashboard?t=${Date.now()}`, { cache: "no-store" });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+        const data = await res.json();
+        const newTimestamp = data.timestamp;
+
+        if (newTimestamp !== lastTimestamp) {
+          lastTimestamp = newTimestamp;
+          latestDashboardData = {
+            charging_points: data.charging_points || {},
+            drivers: data.drivers || {},
+            timestamp: newTimestamp
+          };
+          renderDashboard();
+
+          const cs = document.getElementById('connection-status');
+          cs.textContent = '🟢 Connected';
+          cs.classList.add('online');
+
+          document.getElementById('last-update').textContent =
+            `Last Update: ${new Date().toLocaleTimeString()}`;
+        }
+      } catch (err) {
+        console.error('Dashboard fetch error:', err);
+        const cs = document.getElementById('connection-status');
+        cs.textContent = '🔴 Connection Error';
+        cs.classList.remove('online');
+      }
+    }
+
+    function renderDashboard() {
+      updateChargingPoints(latestDashboardData.charging_points);
+      updateDriverStatus(latestDashboardData.drivers[DRIVER_ID]);
+      updateStatistics();
+    }
+
+    function updateChargingPoints(cps) {
+      const container = document.getElementById('charging-points');
+      container.innerHTML = '';
+
+      if (!cps || Object.keys(cps).length === 0) {
+        container.innerHTML = '<div class="no-data">No charging points registered</div>';
+        return;
+      }
+
+      for (const [cpId, cp] of Object.entries(cps)) {
+        const stateRaw = (cp.state || 'DISCONNECTED');
+        const stateClass = stateRaw.toLowerCase();             // uses underscores (out_of_order)
+        const stateLabel = stateRaw.replace(/_/g, ' ');
+
+        const el = document.createElement('div');
+        el.className = `cp-item ${stateClass}`;
+
+        let content = `
+          <div class="cp-header">
+            <div class="cp-id">${cpId}</div>
+            <div class="cp-status status-${stateClass}">${stateLabel}</div>
+          </div>
+          <div style="font-size:13px">
+            <div style="display:flex;justify-content:space-between;padding:2px 0">
+              <strong>Location:</strong>
+              <span>(${(cp.location||[0,0])[0].toFixed(2)}, ${(cp.location||[0,0])[1].toFixed(2)})</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;padding:2px 0">
+              <strong>Price:</strong>
+              <span>${(cp.price_per_kwh||0).toFixed(2)} €/kWh</span>
+            </div>
+        `;
+
+        if (stateRaw === 'SUPPLYING' && cp.current_driver) {
+          const kwh = cp.kwh_delivered || 0;
+          const amount = cp.amount_euro || 0;
+          const maxCapacity = 15.0;
+          const progress = Math.min((kwh / maxCapacity) * 100, 100).toFixed(0);
+
+          content += `
+            <div style="display:flex;justify-content:space-between;padding:2px 0">
+              <strong>Driver:</strong>
+              <span>${cp.current_driver}</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;padding:2px 0">
+              <strong>Energy:</strong>
+              <span>${kwh.toFixed(2)} kWh</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;padding:2px 0">
+              <strong>Amount:</strong>
+              <span>€${amount.toFixed(2)}</span>
+            </div>
+            <div class="progress-bar-container">
+              <div class="progress-bar" style="width:${progress}%">${progress}%</div>
+            </div>
+          `;
+        }
+
+        content += `</div>`;
+        el.innerHTML = content;
+        container.appendChild(el);
+      }
+    }
+
+    function updateDriverStatus(driver) {
+      const d = driver || {};
+      const isCharging = d.current_cp != null;
+
+      driverStatusText.textContent = isCharging ? 'CHARGING' : (d.status || 'IDLE');
+      driverCpText.textContent = d.current_cp || 'None';
+    }
+
+    function updateStatistics() {
+      fetch(`${API_URL}/api/stats`, { cache: "no-store" })
+        .then(r => r.json())
+        .then(stats => {
+          document.getElementById('stat-total-cps').textContent = stats.total_cps || 0;
+          document.getElementById('stat-active-charges').textContent = stats.active_charges || 0;
+          document.getElementById('stat-total-energy').textContent = (stats.total_energy || 0).toFixed(2);
+          document.getElementById('stat-total-revenue').textContent = `€${(stats.total_revenue || 0).toFixed(2)}`;
+        })
+        .catch(err => console.warn('Stats fetch failed:', err));
+    }
+
+    function forceRefresh() {
+      logDriver("🔄 Forcing dashboard refresh...", "info");
+      fetchDashboardData();
+    }
+
+    // ============================================================================
+    // Driver Actions
+    // ============================================================================
+    async function sendDriverAction(action, cpId = null, kwhNeeded = 10) {
+      const payload = {
+        driver_id: DRIVER_ID,
+        action: action,
+        cp_id: cpId,
+        kwh_needed: kwhNeeded
+      };
+
+      try {
+        const res = await fetch(`${API_URL}/api/driver_action`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        const result = await res.json();
+
+        if (res.ok && result.success) {
+          logDriver(`✅ ${action} completed`, 'success');
+          setTimeout(fetchDashboardData, 500);
+        } else {
+          logDriver(`❌ ${action} failed: ${result.error || 'unknown error'}`, 'error');
+        }
+      } catch (err) {
+        logDriver(`❌ Network error: ${err.message}`, 'error');
+      }
+    }
+
+    function showRequestModal() {
+      const availableCPs = Object.entries(latestDashboardData.charging_points || {})
+        .filter(([id, cp]) => cp.state === 'ACTIVATED' && !cp.current_driver);
+
+      if (!availableCPs.length) {
+        logDriver('⚠️ No available charging points', 'warning');
+        alert('No charging points available right now. Please wait.');
+        return;
+      }
+
+      const cpId = prompt(
+        'Enter CP ID (e.g., CP-001):\n\nAvailable: ' +
+        availableCPs.map(([id]) => id).join(', ')
+      );
+      if (!cpId) return;
+
+      const kwh = parseFloat(prompt('Enter kWh needed:', '15'));
+      if (isNaN(kwh) || kwh <= 0) {
+        logDriver('❌ Invalid kWh value', 'error');
+        return;
+      }
+
+      logDriver(`📤 Requesting ${kwh} kWh at ${cpId}...`, 'info');
+      sendDriverAction('request_charge', cpId, kwh);
+    }
+
+    function driverViewCPs() {
+      const cps = latestDashboardData.charging_points || {};
+      const available = Object.entries(cps)
+        .filter(([id, cp]) => cp.state === 'ACTIVATED' && !cp.current_driver);
+
+      if (!available.length) {
+        logDriver('⚠️ No CPs available', 'warning');
+        return;
+      }
+
+      logDriver('📋 Available Charging Points:', 'info');
+      available.forEach(([id, cp]) => {
+        const loc = cp.location || [0, 0];
+        logDriver(`  • ${id} - €${cp.price_per_kwh}/kWh at (${loc[0]}, ${loc[1]})`, 'info');
+      });
+    }
+
+    function driverFinishCharging() {
+      const driver = latestDashboardData.drivers[DRIVER_ID] || {};
+
+      if (!driver.current_cp) {
+        logDriver('⚠️ Not currently charging', 'warning');
+        alert('You are not currently charging.');
+        return;
+      }
+
+      if (confirm(`Stop charging at ${driver.current_cp}?`)) {
+        logDriver(`🛑 Ending charge at ${driver.current_cp}...`, 'info');
+        sendDriverAction('finish_charging', driver.current_cp);
+      }
+    }
+
+    // ============================================================================
+    // CP Registration
+    // ============================================================================
+    async function registerNewCP() {
+      const cpId = document.getElementById('reg_cp_id').value.trim();
+      const city = document.getElementById('reg_city').value.trim();
+      const price = parseFloat(document.getElementById('reg_price').value);
+
+      const resultBox = document.getElementById('reg-result');
+      resultBox.style.display = 'block';
+      resultBox.className = 'result-box';
+      resultBox.textContent = '⏳ Registering...';
+
+      if (!cpId || !city || isNaN(price)) {
+        resultBox.className = 'result-box error';
+        resultBox.textContent = '❌ All fields required!';
+        return;
+      }
+
+      try {
+        const res = await fetch(`${API_URL}/api/register_cp`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ cp_id: cpId, city: city, price_per_kwh: price })
+        });
+
+        const data = await res.json();
+
+        if (res.ok) {
+          resultBox.className = 'result-box success';
+          resultBox.textContent =
+            `✅ SUCCESS!\n\n` +
+            `CP ID: ${data.cp_id}\n` +
+            `City: ${data.city}\n` +
+            `Coordinates: (${data.latitude}, ${data.longitude})\n` +
+            `Price: €${price}/kWh\n\n` +
+            `✨ Charging point registered in Registry!\n` +
+            `💡 To activate: Start CP engine with these coordinates`;
+
+          logDriver(`✅ Registered ${cpId} in ${city}`, 'success');
+
+          setTimeout(() => {
+            fetchDashboardData();
+            loadRegistry();
+          }, 1000);
+        } else {
+          resultBox.className = 'result-box error';
+          resultBox.textContent = `❌ ERROR: ${data.error || 'Registration failed'}`;
+          logDriver(`❌ Registration failed: ${data.error || 'unknown'}`, 'error');
+        }
+      } catch (err) {
+        resultBox.className = 'result-box error';
+        resultBox.textContent = `❌ Network error: ${err.message}`;
+        logDriver(`❌ Network error: ${err.message}`, 'error');
+      }
+    }
+
+    // ============================================================================
+    // Registry View
+    // ============================================================================
+    async function loadRegistry() {
+      const container = document.getElementById('registry-list');
+      container.innerHTML = '<div class="no-data">⏳ Loading registry...</div>';
+
+      try {
+        const res = await fetch('http://localhost:5001/list');
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+
+        const cps = data.charging_points || [];
+
+        if (!cps.length) {
+          container.innerHTML = '<div class="no-data">No CPs in registry</div>';
+          return;
+        }
+
+        container.innerHTML = '';
+
+        cps.forEach(cp => {
+          const el = document.createElement('div');
+          el.className = 'registry-item';
+          el.innerHTML = `
+            <strong>${cp.cp_id}</strong><br>
+            City: ${cp.city || 'Unknown'}<br>
+            Username: ${cp.username}<br>
+            Password: ${cp.password ? '••••••••' : 'N/A'}<br>
+            Price: €${cp.price_per_kwh}/kWh<br>
+            Registered: ${cp.registered_at ? new Date(cp.registered_at).toLocaleString() : 'Unknown'}
+          `;
+          container.appendChild(el);
+        });
+
+        logDriver(`📋 Loaded ${cps.length} CPs from Registry`, 'success');
+      } catch (err) {
+        container.innerHTML = `<div class="no-data">❌ Error: ${err.message}</div>`;
+        logDriver(`❌ Registry load failed: ${err.message}`, 'error');
+      }
+    }
+
+    // ============================================================================
+    // Weather Control
+    // ============================================================================
+    async function refreshWeather() {
+      const container = document.getElementById('weather-status');
+      container.innerHTML = '<div class="no-data">⏳ Checking weather...</div>';
+
+      const cps = latestDashboardData.charging_points || {};
+      container.innerHTML = '';
+
+      for (const [cpId, cp] of Object.entries(cps)) {
+        const isOutOfService = cp.state === 'OUT_OF_ORDER';
+        const el = document.createElement('div');
+        el.className = `weather-item ${isOutOfService ? 'cold' : 'ok'}`;
+        el.innerHTML = `
+          <div>
+            <strong>${cpId}</strong><br>
+            <small>Status: ${cp.state}</small>
+          </div>
+          <div style="text-align:right">
+            ${isOutOfService ? '❄️ COLD ALERT' : '☀️ OK'}
+          </div>
+        `;
+        container.appendChild(el);
+      }
+
+      if (Object.keys(cps).length === 0) {
+        container.innerHTML = '<div class="no-data">No CPs to monitor</div>';
+      }
+    }
+
+    async function sendWeatherAlert(alertType) {
+      const resultBox = document.getElementById('weather-result');
+
+      resultBox.style.display = 'block';
+      resultBox.className = 'result-box info';
+      resultBox.textContent =
+        'ℹ️ Weather alerts are handled automatically by the Weather Service (EV_W).\n' +
+        'This dashboard only displays the current weather status.';
+    }
+
+    // ============================================================================
+    // Charging History
+    // ============================================================================
+    async function loadHistory() {
+      const container = document.getElementById('history-list');
+      container.innerHTML = '<div class="no-data">⏳ Loading history...</div>';
+
+      try {
+        const res = await fetch(`${API_URL}/api/history`, { cache: "no-store" });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+
+        const history = data.history || [];
+        if (!history.length) {
+          container.innerHTML = '<div class="no-data">No charging sessions yet</div>';
+          return;
+        }
+
+        container.innerHTML = '';
+
+        history.slice(0, 10).forEach(session => {
+          const el = document.createElement('div');
+          el.className = 'registry-item';
+
+          const timestamp = session.timestamp
+            ? new Date(session.timestamp * 1000).toLocaleString()
+            : 'Unknown';
+
+          el.innerHTML = `
+            <strong>${session.cp_id || 'Unknown'}</strong> ← ${session.driver_id || 'Unknown'}<br>
+            Energy: ${(session.kwh_delivered || 0).toFixed(2)} kWh<br>
+            Cost: €${(session.total_amount || 0).toFixed(2)}<br>
+            Time: ${timestamp}
+          `;
+          container.appendChild(el);
+        });
+
+        logDriver(`📜 Loaded ${history.length} charging sessions`, 'success');
+      } catch (err) {
+        container.innerHTML = `<div class="no-data">❌ Error: ${err.message}</div>`;
+        logDriver(`❌ History load failed: ${err.message}`, 'error');
+      }
+    }
+
+    // ============================================================================
+    // Start Polling + Initial Loads
+    // ============================================================================
+    setInterval(fetchDashboardData, POLLING_INTERVAL);
+    fetchDashboardData();
+
+    setTimeout(() => {
+      loadRegistry();
+      refreshWeather();
+      loadHistory();
+    }, 2000);
+
+    // SSE Backup
+    if (window.EventSource) {
+      try {
+        const es = new EventSource(`${API_URL}/api/stream`);
+        es.onmessage = () => fetchDashboardData();
+        es.onerror = () => console.warn('SSE error (will keep polling).');
+      } catch (err) {
+        console.warn('SSE not available', err);
+      }
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,65 @@
+services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.3.0
+    container_name: evcharging_zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+      
+  kafka:
+    image: confluentinc/cp-kafka:7.3.0
+    container_name: evcharging_kafka
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_LISTENERS: PLAINTEXT://192.168.56.103:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      ALLOW_PLAINTEXT_LISTENER: "yes"
+    ports:
+      - "9092:9092"
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+
+  central:
+    build:
+      context: .
+      dockerfile: Dockerfile.central
+    image: evcharging-central
+    container_name: evcharging_central
+    depends_on:
+      - kafka
+    environment:
+      KAFKA_BROKER: kafka:9092
+      REGISTRY_URL: http://registry:5001
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./data:/app/data
+    stdin_open: true
+    tty: true
+
+  web_ui:
+    build:
+      context: .
+      dockerfile: Dockerfile.ui
+    container_name: evcharging_ui
+    depends_on:
+      - central
+    environment:
+      CENTRAL_HOST: central
+      CENTRAL_PORT: 5000
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+
+networks:
+  distributed_net:
+    driver: bridge
