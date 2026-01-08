@@ -1,6 +1,0 @@
-kafka-python==2.0.2
-flask
-flask-cors
-cryptography==41.0.0
-requests==2.31.0
-requests

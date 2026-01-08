@@ -1,6 +1,0 @@
-# EVCharging System - Sample Charging Requests
-# Format: CP_ID, KWH_NEEDED
-# One request per line, will be processed sequentially with 4-second delay between them
-
-CP-001, 10
-CP-002, 10
