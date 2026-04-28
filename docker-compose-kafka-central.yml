@@ -1,0 +1,73 @@
+version: "3.9"
+
+services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.3.0
+    container_name: ev_zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+
+  kafka:
+    image: confluentinc/cp-kafka:7.3.0
+    container_name: ev_kafka
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      ALLOW_PLAINTEXT_LISTENER: "yes"
+    ports:
+      - "9092:9092"
+    command: sh -c "sleep 20 && /etc/confluent/docker/run"
+    restart: unless-stopped
+
+  central:
+    build:
+      context: .
+      dockerfile: Dockerfile.central
+    container_name: ev_central
+    depends_on:
+      - kafka
+    environment:
+      KAFKA_BROKER: kafka:9092
+      OPENWEATHER_API_KEY: ${OPENWEATHER_API_KEY}
+    ports:
+      - "5000:5000"
+      - "5003:5003"
+    volumes:
+      - ./data:/app/data
+    stdin_open: true
+    tty: true
+
+  web_ui:
+    build:
+      context: .
+      dockerfile: Dockerfile.ui
+    container_name: ev_ui
+    depends_on:
+      - central
+      - model_service
+    environment:
+      CENTRAL_HOST: central
+      CENTRAL_PORT: 5000
+      CENTRAL_API_URL: http://central:5003
+      MODEL_URL: http://model_service:8000/predict
+    ports:
+      - "8000:8000"
+
+  model_service:
+    build:
+      context: ./model_service
+    container_name: ev_model_service
+    ports:
+      - "8001:8000"
+
+networks:
+  default:
+    driver: bridge

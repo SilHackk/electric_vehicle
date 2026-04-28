@@ -1,0 +1,68 @@
+version: "3.9"
+
+services:
+  cp_engine_1:
+    build:
+      context: .
+      dockerfile: Dockerfile.cp
+    container_name: cp_engine_1
+    command: sh -c "sleep 15 && python charging_point/ev_cp_engine.py CP-001 40.5 -3.1 0.30 central 5000"
+    environment:
+      KAFKA_BROKER: kafka:9092
+      CP_DEFAULT_PASSWORD: cp_default_secret
+    extra_hosts:
+      - "central:192.168.56.103"
+      - "kafka:192.168.56.103"
+    stdin_open: true
+    tty: true
+
+  cp_monitor_1:
+    build:
+      context: .
+      dockerfile: Dockerfile.cp
+    container_name: cp_monitor_1
+    depends_on:
+      - cp_engine_1
+    command: sh -c "sleep 20 && python charging_point/ev_cp_monitor.py CP-001 central 5000"
+    environment:
+      KAFKA_BROKER: kafka:9092
+    extra_hosts:
+      - "central:192.168.56.103"
+      - "kafka:192.168.56.103"
+    stdin_open: true
+    tty: true
+
+  cp_engine_2:
+    build:
+      context: .
+      dockerfile: Dockerfile.cp
+    container_name: cp_engine_2
+    command: sh -c "sleep 15 && python charging_point/ev_cp_engine.py CP-002 40.4 -3.2 0.35 central 5000"
+    environment:
+      KAFKA_BROKER: kafka:9092
+      CP_DEFAULT_PASSWORD: cp_default_secret
+    extra_hosts:
+      - "central:192.168.56.103"
+      - "kafka:192.168.56.103"
+    stdin_open: true
+    tty: true
+
+  cp_monitor_2:
+    build:
+      context: .
+      dockerfile: Dockerfile.cp
+    container_name: cp_monitor_2
+    depends_on:
+      - cp_engine_2
+    command: sh -c "sleep 20 && python charging_point/ev_cp_monitor.py CP-002 central 5000"
+    environment:
+      KAFKA_BROKER: kafka:9092
+    extra_hosts:
+      - "central:192.168.56.103"
+      - "kafka:192.168.56.103"
+    stdin_open: true
+    tty: true
+
+networks:
+  default:
+    driver: bridge

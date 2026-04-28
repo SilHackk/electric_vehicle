@@ -1,0 +1,50 @@
+version: "3.9"
+
+services:
+  driver_1:
+    build:
+      context: .
+      dockerfile: Dockerfile.driver
+    container_name: driver_1
+    command: sh -c "sleep 25 && python driver/ev_driver.py DRIVER-001 central 5000"
+    environment:
+      KAFKA_BROKER: kafka:9092
+    extra_hosts:
+      - "central:192.168.56.103"
+      - "kafka:192.168.56.103"
+    stdin_open: true
+    tty: true
+
+  driver_2:
+    build:
+      context: .
+      dockerfile: Dockerfile.driver
+    container_name: driver_2
+    command: sh -c "sleep 25 && python driver/ev_driver.py DRIVER-002 central 5000"
+    environment:
+      KAFKA_BROKER: kafka:9092
+    extra_hosts:
+      - "central:192.168.56.103"
+      - "kafka:192.168.56.103"
+    stdin_open: true
+    tty: true
+
+  driver_auto:
+    build:
+      context: .
+      dockerfile: Dockerfile.driver
+    container_name: driver_auto
+    command: sh -c "sleep 30 && python driver/ev_driver_auto.py DRIVER-AUTO central 5000 data/charging_requests.txt"
+    environment:
+      KAFKA_BROKER: kafka:9092
+    volumes:
+      - ./data:/app/data
+    extra_hosts:
+      - "central:192.168.56.103"
+      - "kafka:192.168.56.103"
+
+
+
+networks:
+  default:
+    driver: bridge

@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>EV Charging Recommendation Dashboard</title>
+  <style>
+    :root { --brand:#667eea; --accent:#764ba2; }
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:Segoe UI, Tahoma, Arial;background:linear-gradient(135deg,var(--brand),var(--accent));padding:20px;min-height:100vh}
+    .container{max-width:1300px;margin:0 auto}
+    header{background:#fff;border-radius:12px;padding:20px;margin-bottom:18px;box-shadow:0 8px 24px rgba(0,0,0,.12)}
+    h1{color:var(--brand);font-size:1.8rem}
+    h2{color:var(--brand);font-size:1.2rem;margin-bottom:12px}
+    .dashboard{display:grid;grid-template-columns:repeat(3, 1fr);gap:16px;margin-bottom:16px}
+    .card{background:#fff;border-radius:12px;padding:18px;box-shadow:0 8px 24px rgba(0,0,0,.08)}
+    .card.full{grid-column:span 3}
+    .station-item{background:#f8f9fa;border-left:6px solid #6c757d;padding:12px;border-radius:8px;margin-bottom:12px}
+    .station-item.free{border-left-color:#28a745;background:#eaf8ee}
+    .station-item.busy{border-left-color:#dc3545;background:#ffe8e8}
+    .station-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+    .station-name{font-weight:700;font-size:1.1rem}
+    .badge{padding:6px 12px;border-radius:20px;font-weight:700;font-size:0.85rem}
+    .badge-free{background:#28a745;color:#fff}
+    .badge-busy{background:#dc3545;color:#fff}
+    .stat-box{background:linear-gradient(135deg,var(--brand),var(--accent));color:#fff;padding:18px;border-radius:8px;text-align:center;margin-bottom:10px}
+    input, select{width:100%;padding:10px;margin:6px 0;border:1px solid #ddd;border-radius:8px;font-size:14px}
+    .btn{padding:10px 16px;border-radius:8px;border:0;cursor:pointer;font-weight:700;margin-top:8px;font-size:14px;width:100%}
+    .btn-primary{background:#667eea;color:#fff}
+    .recommend-box{padding:14px;border-radius:10px;background:#f8f9fa;margin-top:12px}
+    .recommend-box.success{background:#d4edda;color:#155724}
+    .mini-row{display:flex;justify-content:space-between;padding:4px 0}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>EV Charging Recommendation Dashboard</h1>
+    </header>
+
+    <div class="dashboard">
+      <div class="card">
+        <h2>Driver Input</h2>
+        <form method="POST">
+          <label><strong>Battery level (%)</strong></label>
+          <input type="number" name="battery" min="1" max="100" value="{{ form_data.battery }}" required>
+
+          <label><strong>Location (city)</strong></label>
+          <select name="city" required>
+            {% for city in ["Vilnius","Kaunas","Klaipeda","Siauliai","Panevezys","Alytus"] %}
+            <option value="{{ city }}" {% if form_data.city == city %}selected{% endif %}>{{ city }}</option>
+            {% endfor %}
+          </select>
+
+          <label><strong>Desired charge (kWh)</strong></label>
+          <input type="number" step="0.1" min="1" name="energy" value="{{ form_data.energy }}" required>
+
+          <label><strong>Priority</strong></label>
+          <select name="priority" required>
+            <option value="0" {% if form_data.priority|string == "0" %}selected{% endif %}>Cheapest</option>
+            <option value="1" {% if form_data.priority|string == "1" %}selected{% endif %}>Fastest</option>
+          </select>
+
+          <button type="submit" class="btn btn-primary">Recommend Station</button>
+        </form>
+
+        {% if result %}
+        <div class="recommend-box success">
+          <div><strong>Recommended station:</strong> {{ result.station }}</div>
+          <div class="mini-row"><span>City:</span><span>{{ result.station_city }}</span></div>
+          <div class="mini-row"><span>Estimated cost:</span><span>{% if result.cost is not none %}€{{ "%.2f"|format(result.cost) }}{% else %}-{% endif %}</span></div>
+          <div class="mini-row"><span>Estimated duration:</span><span>{% if result.duration is not none %}{{ "%.2f"|format(result.duration) }} h{% else %}-{% endif %}</span></div>
+          <div class="mini-row"><span>Free:</span><span>{{ "Yes" if result.free else "No" }}</span></div>
+          <div class="mini-row"><span>User city:</span><span>{{ result.user_city }}</span></div>
+          <div class="mini-row"><span>Priority:</span><span>{{ result.priority_label }}</span></div>
+        </div>
+        {% endif %}
+      </div>
+
+      <div class="card">
+        <h2>Charging Stations</h2>
+        {% for key, station in stations.items() %}
+        <div class="station-item {{ 'free' if station.free else 'busy' }}">
+          <div class="station-header">
+            <div class="station-name">{{ station.name }}</div>
+            <div class="badge {{ 'badge-free' if station.free else 'badge-busy' }}">
+              {{ 'FREE' if station.free else 'BUSY' }}
+            </div>
+          </div>
+          <div class="mini-row"><span>City:</span><span>{{ station.city }}</span></div>
+          <div class="mini-row"><span>Power:</span><span>{{ station.power }} kW</span></div>
+          <div class="mini-row"><span>Price:</span><span>€{{ "%.2f"|format(station.price) }}/kWh</span></div>
+        </div>
+        {% endfor %}
+      </div>
+
+      <div class="card">
+        <h2>Where to open</h2>
+        <div class="stat-box">
+          <div style="font-size:1.4rem">/</div>
+          <div>Main EV dashboard</div>
+        </div>
+        <div class="stat-box">
+          <div style="font-size:1.4rem">/ai</div>
+          <div>AI recommendation dashboard</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

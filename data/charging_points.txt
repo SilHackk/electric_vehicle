@@ -1,0 +1,4 @@
+{"cp_id": "CP-002", "latitude": 40.4, "longitude": -3.2, "price_per_kwh": 0.35, "state": "ACTIVATED", "registered_at": "2026-04-26T18:49:39.871986"}
+{"cp_id": "CP-001", "latitude": 40.5, "longitude": -3.1, "price_per_kwh": 0.3, "state": "ACTIVATED", "registered_at": "2026-04-26T18:49:39.828207"}
+{"cp_id": "CP-003", "latitude": 39.4697065, "longitude": -0.3763353, "price_per_kwh": 0.3, "state": "DISCONNECTED", "registered_at": "2026-04-26T18:38:10.669442"}
+{"cp_id": "CP-004", "latitude": 39.4697065, "longitude": -0.3763353, "price_per_kwh": 0.3, "state": "DISCONNECTED", "registered_at": "2026-04-26T18:28:23.324153"}
